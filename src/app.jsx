@@ -297,11 +297,11 @@ function App() {
   };
 
   const handleSave = (note) => {
-    upsertNote(note);
+    const saved = upsertNote(note);
     refresh();
-    toast.push("บันทึกข้อมูลเรียบร้อย", "ok");
-    setView("dashboard");
-    setEditing(null);
+    toast.push("บันทึกข้อมูลเรียบร้อย ✓ — กด Upload to Drive เพื่อสำรองข้อมูล", "ok");
+    // อยู่หน้า form ต่อ แต่ update note ให้มี createdAt/updatedAt (unlock Upload)
+    setEditing({ ...note, createdAt: saved.createdAt || note.createdAt || new Date().toISOString(), updatedAt: saved.updatedAt });
   };
 
   const handleDuplicate = (id) => {
@@ -319,7 +319,7 @@ function App() {
 
   const handleExportPdf = (note) => {
     if (!note.driveUploadedAt) {
-      toast.push("กรุณา Upload to Drive ก่อน แล้วจึง Export PDF ได้", "err");
+      toast.push("ต้อง Upload to Drive สำเร็จก่อน จึงจะ Export PDF ได้", "err");
       return;
     }
     exportPdf(note, LOGO_SRC);
