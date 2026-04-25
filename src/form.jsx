@@ -44,12 +44,16 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
             {n.date ? ` · ${n.date}` : ""}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8, position: "relative", zIndex: 1 }}>
+        <div style={{ display: "flex", gap: 8, position: "relative", zIndex: 1, flexWrap: "wrap" }}>
           <button className="btn" onClick={onCancel}>ยกเลิก</button>
-          <button className="btn" onClick={() => onExportPdf(n)}>
-            <span>📄</span> Export PDF
+          <button
+            className={"btn" + (n.driveUploadedAt ? "" : " btn-locked")}
+            title={n.driveUploadedAt ? "Export PDF" : "กรุณา Upload to Drive ก่อน"}
+            onClick={() => onExportPdf(n)}
+          >
+            <span>{n.driveUploadedAt ? "📄" : "🔒"}</span> Export PDF
           </button>
-          <button className="btn" onClick={() => onUploadDrive(n)}>
+          <button className="btn btn-primary" style={{ background: "var(--rose)", color: "#fff", borderColor: "var(--rose)" }} onClick={() => onUploadDrive(n)}>
             <span>☁</span> Upload to Drive
           </button>
           <button className="btn btn-primary" onClick={save}>บันทึก</button>
