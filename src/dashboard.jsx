@@ -148,11 +148,11 @@ function Dashboard({ notes, onNew, onOpen, onDuplicate, onDelete, onExportPdf, o
           <table>
             <thead>
               <tr>
-                <th style={{ width: 110 }}>วันที่</th>
+                <th style={{ width: 110 }} className="col-hide-mobile">วันที่</th>
                 <th>ผู้ป่วย / HN</th>
-                <th>Operation</th>
-                <th>Surgeon</th>
-                <th style={{ width: 80 }}>Side</th>
+                <th className="col-hide-mobile">Operation</th>
+                <th className="col-hide-mobile">Surgeon</th>
+                <th style={{ width: 80 }} className="col-hide-mobile">Side</th>
                 <th style={{ width: 100 }}>Status</th>
                 <th style={{ width: 160, textAlign: "right" }}>Actions</th>
               </tr>
@@ -163,19 +163,19 @@ function Dashboard({ notes, onNew, onOpen, onDuplicate, onDelete, onExportPdf, o
                 const hrs = hoursLeft(n);
                 return (
                 <tr key={n.id} style={locked ? { opacity: 0.75 } : undefined}>
-                  <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--ink-2)" }}>{n.date || "—"}</td>
+                  <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--ink-2)" }} className="col-hide-mobile">{n.date || "—"}</td>
                   <td>
                     <div style={{ fontWeight: 500 }}>{n.name || <span style={{ color: "var(--ink-4)" }}>(ไม่ระบุชื่อ)</span>}</div>
                     <div style={{ fontSize: 11.5, color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
-                      HN {n.hn || "—"} · {n.age || "?"}ปี · {n.gender || "—"}
+                      HN {n.hn || "—"} · {n.date || "?"} · {n.age || "?"}ปี
                     </div>
                   </td>
-                  <td>
+                  <td className="col-hide-mobile">
                     <div>{n.operation || <span style={{ color: "var(--ink-4)" }}>—</span>}</div>
                     {n.preopdx && <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{n.preopdx.slice(0, 60)}{n.preopdx.length > 60 ? "…" : ""}</div>}
                   </td>
-                  <td style={{ color: "var(--ink-2)" }}>{n.surgeon || "—"}</td>
-                  <td>{n.side && <span className="pill pill-pink">{n.side}</span>}</td>
+                  <td style={{ color: "var(--ink-2)" }} className="col-hide-mobile">{n.surgeon || "—"}</td>
+                  <td className="col-hide-mobile">{n.side && <span className="pill pill-pink">{n.side}</span>}</td>
                   <td>
                     {locked
                       ? <span className="pill pill-gray" title="Locked after 24h">🔒 Locked</span>
@@ -194,8 +194,12 @@ function Dashboard({ notes, onNew, onOpen, onDuplicate, onDelete, onExportPdf, o
                       <button className="btn btn-sm" onClick={() => tryOpen(n)} disabled={locked} style={locked ? { opacity: 0.4, cursor: "not-allowed" } : undefined}>
                         {locked ? "Locked" : "Open"}
                       </button>
-                      <button className="btn btn-sm btn-ghost" onClick={() => onExportPdf(n)} title="PDF">PDF</button>
-                      <button className="btn btn-sm btn-ghost" onClick={() => onUploadDrive(n)} title="Upload">☁</button>
+                      <button
+                        className={"btn btn-sm btn-ghost" + (n.driveUploadedAt ? "" : " btn-locked")}
+                        title={n.driveUploadedAt ? "Export PDF" : "Upload to Drive ก่อน"}
+                        onClick={() => onExportPdf(n)}
+                      >{n.driveUploadedAt ? "PDF" : "🔒"}</button>
+                      <button className="btn btn-sm btn-ghost" onClick={() => onUploadDrive(n)} title="Upload to Drive">☁</button>
                       <button className="btn btn-sm btn-ghost" onClick={() => onDuplicate(n.id)} title="Duplicate" disabled={locked} style={locked ? { opacity: 0.4, cursor: "not-allowed" } : undefined}>⎘</button>
                       <button className="btn btn-sm btn-ghost btn-danger" onClick={() => onDelete(n.id)} title="Delete">✕</button>
                     </div>
