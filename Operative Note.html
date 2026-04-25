@@ -235,7 +235,8 @@
   .hamburger svg { width: 18px; height: 18px; color: var(--ink-2); }
 
   /* lock icon for locked export button */
-  .btn-locked { opacity: 0.45; cursor: not-allowed !important; }
+  .btn-locked { opacity: 0.42; cursor: not-allowed !important; pointer-events: auto !important; }
+  .btn-locked:hover { border-color: var(--line-2); background: #fff; }
 
   /* ── Tablet (≤1100px) ── */
   @media (max-width: 1100px) {
