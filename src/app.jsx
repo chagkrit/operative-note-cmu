@@ -122,35 +122,109 @@ async function requestAccessToken() {
   });
 }
 
-async function driveUploadPdf(pdfBlob, fileName, folderId) {
-  let token = getStoredToken();
-  if (!token) token = await requestAccessToken();
+// ---- SheetJS loader ----
+let _xlsxLoaded = false;
+function loadXlsx() {
+  return new Promise((resolve, reject) => {
+    if (window.XLSX) { resolve(); return; }
+    if (_xlsxLoaded) { resolve(); return; }
+    const s = document.createElement("script");
+    s.src = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js";
+    s.onload = () => { _xlsxLoaded = true; resolve(); };
+    s.onerror = () => {
+      // fallback CDN
+      const s2 = document.createElement("script");
+      s2.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+      s2.onload = () => { _xlsxLoaded = true; resolve(); };
+      s2.onerror = reject;
+      document.head.appendChild(s2);
+    };
+    document.head.appendChild(s);
+  });
+}
 
-  const metadata = {
-    name: fileName,
-    mimeType: "application/pdf",
-    parents: folderId ? [folderId] : undefined,
-  };
+// localStorage key for tracking the Excel file ID on Drive
+const DRIVE_EXCEL_FILE_ID_KEY = "op_notes_excel_fid_v1";
+function getExcelFileId() { try { return localStorage.getItem(DRIVE_EXCEL_FILE_ID_KEY) || null; } catch { return null; } }
+function setExcelFileId(id) { try { localStorage.setItem(DRIVE_EXCEL_FILE_ID_KEY, id); } catch {} }
 
-  const boundary = "boundary_" + Math.random().toString(36).slice(2);
-  const encoder = new TextEncoder();
+// Excel column headers — order matters, matches note fields
+const EXCEL_COLUMNS = [
+  { key: "date",           header: "Date" },
+  { key: "hn",             header: "HN" },
+  { key: "name",           header: "Patient Name" },
+  { key: "age",            header: "Age" },
+  { key: "gender",         header: "Gender" },
+  { key: "ward",           header: "Ward" },
+  { key: "surgeon",        header: "Surgeon" },
+  { key: "firstassistant", header: "1st Assistant" },
+  { key: "secondassistant",header: "2nd Assistant" },
+  { key: "thirdassistant", header: "3rd Assistant" },
+  { key: "anesthesia",     header: "Anesthesia" },
+  { key: "scrub",          header: "Scrub Nurse" },
+  { key: "room",           header: "OR Room" },
+  { key: "opstart",        header: "Op Start" },
+  { key: "opend",          header: "Op End" },
+  { key: "totaloptime",    header: "Total Op Time (min)" },
+  { key: "side",           header: "Side" },
+  { key: "preopdx",        header: "Pre-Op Dx" },
+  { key: "mmg_birads",     header: "MMG BIRADS" },
+  { key: "neoadj_rt",      header: "Neoadj RT" },
+  { key: "us_thyroid_risk",header: "US Thyroid Risk" },
+  { key: "operation",      header: "Operation" },
+  { key: "postopdx",       header: "Post-Op Dx" },
+  { key: "position",       header: "Position" },
+  { key: "incision",       header: "Incision" },
+  { key: "opfinding",      header: "Op Finding" },
+  { key: "opprocedure",    header: "Op Procedure" },
+  { key: "specimen",       header: "Specimen" },
+  { key: "ebl",            header: "EBL (ml)" },
+  { key: "fluid",          header: "IV Fluid (ml)" },
+  { key: "bloodtx",        header: "Blood Tx (unit)" },
+  { key: "drain",          header: "Drain" },
+  { key: "complication",   header: "Complication" },
+  { key: "patientcondition",header: "Patient Condition" },
+  { key: "signature",      header: "Signature" },
+  { key: "complete",       header: "Complete" },
+  { key: "createdAt",      header: "Created At" },
+  { key: "updatedAt",      header: "Updated At" },
+  { key: "driveUploadedAt",header: "Drive Uploaded At" },
+];
 
-  const pdfBuf = await pdfBlob.arrayBuffer();
-  const pre = encoder.encode(
-    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: application/pdf\r\n\r\n`
+function noteToRow(note) {
+  return EXCEL_COLUMNS.map(c => {
+    const v = note[c.key];
+    if (v === null || v === undefined) return "";
+    if (typeof v === "boolean") return v ? "Yes" : "No";
+    return String(v);
+  });
+}
+
+// Upload any binary blob to Drive (multipart), returns {id, webViewLink}
+async function driveUploadBlob(blob, mimeType, fileName, folderId, existingFileId, accessToken) {
+  const metadata = { name: fileName, mimeType };
+  if (!existingFileId && folderId) metadata.parents = [folderId];
+
+  const boundary = "xlsxbnd_" + Math.random().toString(36).slice(2);
+  const buf = await blob.arrayBuffer();
+  const enc = new TextEncoder();
+  const pre = enc.encode(
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`
   );
-  const post = encoder.encode(`\r\n--${boundary}--`);
-  const body = new Uint8Array(pre.byteLength + pdfBuf.byteLength + post.byteLength);
+  const post = enc.encode(`\r\n--${boundary}--`);
+  const body = new Uint8Array(pre.byteLength + buf.byteLength + post.byteLength);
   body.set(pre, 0);
-  body.set(new Uint8Array(pdfBuf), pre.byteLength);
-  body.set(post, pre.byteLength + pdfBuf.byteLength);
+  body.set(new Uint8Array(buf), pre.byteLength);
+  body.set(post, pre.byteLength + buf.byteLength);
 
-  const resp = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink", {
-    method: "POST",
-    headers: {
-      Authorization: "Bearer " + token.accessToken,
-      "Content-Type": `multipart/related; boundary=${boundary}`,
-    },
+  const url = existingFileId
+    ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=multipart&fields=id,name,webViewLink`
+    : `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink`;
+  const method = existingFileId ? "PATCH" : "POST";
+
+  const resp = await fetch(url, {
+    method,
+    headers: { Authorization: "Bearer " + accessToken, "Content-Type": `multipart/related; boundary=${boundary}` },
     body,
   });
   if (!resp.ok) {
@@ -159,6 +233,111 @@ async function driveUploadPdf(pdfBlob, fileName, folderId) {
     throw new Error("Upload failed: " + err);
   }
   return await resp.json();
+}
+
+// Download file bytes from Drive
+async function driveDownloadFile(fileId, accessToken) {
+  const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    headers: { Authorization: "Bearer " + accessToken },
+  });
+  if (!resp.ok) {
+    if (resp.status === 404 || resp.status === 403) return null; // file deleted/moved
+    throw new Error("Download failed: " + await resp.text());
+  }
+  return await resp.arrayBuffer();
+}
+
+const EXCEL_FILENAME = "OperativeNotes_CMU.xlsx";
+const EXCEL_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const SHEET_NAME = "Operative Notes";
+
+// Main function: upsert note row in the shared Excel file on Drive
+async function driveUpsertExcel(note, folderId) {
+  await loadXlsx();
+  let token = getStoredToken();
+  if (!token) token = await requestAccessToken();
+  const at = token.accessToken;
+
+  const headers = EXCEL_COLUMNS.map(c => c.header);
+  const newRow = noteToRow(note);
+  let wb;
+  let existingFileId = getExcelFileId();
+
+  // Try to download existing workbook
+  if (existingFileId) {
+    const buf = await driveDownloadFile(existingFileId, at);
+    if (buf) {
+      wb = XLSX.read(new Uint8Array(buf), { type: "array" });
+    } else {
+      // File gone — will create new
+      existingFileId = null;
+      setExcelFileId(null);
+    }
+  }
+
+  if (!wb) {
+    // Create brand-new workbook
+    wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([headers]);
+    // Style header row bold by adding cell metadata
+    headers.forEach((_, ci) => {
+      const cell = ws[XLSX.utils.encode_cell({ r: 0, c: ci })];
+      if (cell) cell.s = { font: { bold: true } };
+    });
+    XLSX.utils.book_append_sheet(wb, ws, SHEET_NAME);
+  }
+
+  const ws = wb.Sheets[SHEET_NAME] || wb.Sheets[wb.SheetNames[0]];
+
+  // Check if this note's row already exists (match by HN + date + name)
+  const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+  const hnColIdx = headers.indexOf("HN");
+  const dateColIdx = headers.indexOf("Date");
+  const nameColIdx = headers.indexOf("Patient Name");
+  let existingRowIdx = -1;
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    if (
+      String(row[hnColIdx] || "") === String(note.hn || "") &&
+      String(row[dateColIdx] || "") === String(note.date || "") &&
+      String(row[nameColIdx] || "") === String(note.name || "")
+    ) {
+      existingRowIdx = i;
+      break;
+    }
+  }
+
+  if (existingRowIdx >= 0) {
+    // Update existing row
+    EXCEL_COLUMNS.forEach((col, ci) => {
+      const cellAddr = XLSX.utils.encode_cell({ r: existingRowIdx, c: ci });
+      ws[cellAddr] = { t: "s", v: newRow[ci] };
+    });
+    // Update sheet range if needed
+    const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
+    range.e.c = Math.max(range.e.c, EXCEL_COLUMNS.length - 1);
+    ws["!ref"] = XLSX.utils.encode_range(range);
+  } else {
+    // Append new row
+    XLSX.utils.sheet_add_aoa(ws, [newRow], { origin: -1 });
+  }
+
+  // Set column widths
+  ws["!cols"] = EXCEL_COLUMNS.map((c, i) => {
+    const widths = { "Patient Name": 24, "Op Finding": 40, "Op Procedure": 40, "Pre-Op Dx": 28, "Post-Op Dx": 28, "Patient Condition": 40 };
+    return { wch: widths[c.header] || Math.max(c.header.length + 2, 12) };
+  });
+
+  // Write to blob
+  const wbArr = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  const xlsxBlob = new Blob([wbArr], { type: EXCEL_MIME });
+
+  const result = await driveUploadBlob(xlsxBlob, EXCEL_MIME, EXCEL_FILENAME, folderId, existingFileId || null, at);
+
+  // Save file ID for next time
+  if (result.id) setExcelFileId(result.id);
+
+  return result;
 }
 
 // Build a PDF blob from the note using html2pdf
@@ -333,17 +512,13 @@ function App() {
       return;
     }
     try {
-      toast.push("กำลังสร้าง PDF…");
-      const blob = await buildPdfBlob(note);
-      const safeName = (note.name || "note").replace(/[^\u0E00-\u0E7Fa-zA-Z0-9_-]/g, "_");
-      const fname = `${note.date || "nodate"}_HN${note.hn || "x"}_${safeName}.pdf`;
-      toast.push("กำลังอัปโหลดไปยัง Drive…");
-      const result = await driveUploadPdf(blob, fname, DRIVE_FOLDER_ID);
+      toast.push("กำลังเตรียมข้อมูล Excel…");
+      const result = await driveUpsertExcel(note, DRIVE_FOLDER_ID);
       const updated = { ...note, driveUploadedAt: new Date().toISOString(), driveFileId: result.id, driveFileLink: result.webViewLink };
       upsertNote(updated);
       refresh();
       if (editing && editing.id === note.id) setEditing(updated);
-      toast.push("อัปโหลดสำเร็จ! ไฟล์อยู่บน Drive แล้ว", "ok");
+      toast.push("อัปโหลด Excel สำเร็จ! บันทึกลง OperativeNotes_CMU.xlsx บน Drive แล้ว ☁", "ok");
     } catch (e) {
       console.error(e);
       const msg = String(e.message);
@@ -397,9 +572,6 @@ function App() {
             <span className="dot"></span> New note
           </button>
           <div style={{ borderTop: "1px solid var(--line)", margin: "12px 0 8px" }} />
-          <button onClick={() => { setDriveSetup(true); closeSidebar(); }}>
-            <span className="dot"></span> Drive API settings
-          </button>
           <button onClick={logout}>
             <span className="dot"></span> Logout
           </button>
