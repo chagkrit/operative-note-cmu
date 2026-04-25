@@ -63,8 +63,9 @@ function LoginScreen({ onLogin }) {
 const GOOGLE_CLIENT_ID_KEY = "op_notes_gcid_v1";
 const GOOGLE_TOKEN_KEY = "op_notes_gtoken_v1";
 
+const DEFAULT_CLIENT_ID = "929532184474-1jresva7l73jnj96sfll47jum48sggt8.apps.googleusercontent.com";
 function getClientId() {
-  try { return localStorage.getItem(GOOGLE_CLIENT_ID_KEY) || ""; } catch { return ""; }
+  try { return localStorage.getItem(GOOGLE_CLIENT_ID_KEY) || DEFAULT_CLIENT_ID; } catch { return DEFAULT_CLIENT_ID; }
 }
 function setClientId(v) {
   try { localStorage.setItem(GOOGLE_CLIENT_ID_KEY, v); } catch {}
