@@ -16,25 +16,70 @@ function calcOpTime(start, end) {
 
 function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUploadDrive, logoSrc, toast }) {
   const [n, setN] = React.useState(note);
+  // isSaved = true หลังจากกด "บันทึก" ครั้งแรก (หรือ note ที่โหลดจาก storage ซึ่งมี createdAt แล้ว)
+  const [isSaved, setIsSaved] = React.useState(!!(note.createdAt));
+  // hasUnsaved = มีการแก้ไขหลังจาก save ล่าสุด
+  const [hasUnsaved, setHasUnsaved] = React.useState(false);
 
-  React.useEffect(() => { setN(note); }, [note.id]);
+  React.useEffect(() => {
+    setN(note);
+    setIsSaved(!!(note.createdAt));
+    setHasUnsaved(false);
+  }, [note.id]);
 
   const update = (patch) => {
     const next = { ...n, ...patch };
-    // Auto-calc total op time
     if (("opstart" in patch) || ("opend" in patch)) {
       next.totaloptime = calcOpTime(next.opstart, next.opend);
     }
     setN(next);
+    setHasUnsaved(true);
     onChange && onChange(next);
   };
 
   const save = () => {
     onSave(n);
+    setIsSaved(true);
+    setHasUnsaved(false);
   };
+
+  // Lock states
+  const canUpload = isSaved && !hasUnsaved;
+  const canExport = !!(n.driveUploadedAt);
+
+  // Step indicator
+  const step = !isSaved ? 1 : (hasUnsaved ? 1 : (!n.driveUploadedAt ? 2 : 3));
+  const stepLabels = ["1 กรอกข้อมูล & บันทึก", "2 Upload to Drive", "3 Export PDF"];
 
   return (
     <>
+      {/* Step progress bar */}
+      <div style={{ display: "flex", gap: 0, marginBottom: 16, background: "#fff", border: "1px solid var(--line)", borderRadius: "var(--radius)", overflow: "hidden" }}>
+        {stepLabels.map((label, i) => {
+          const stepNum = i + 1;
+          const done = step > stepNum;
+          const active = step === stepNum;
+          return (
+            <div key={i} style={{
+              flex: 1, padding: "10px 14px", display: "flex", alignItems: "center", gap: 8,
+              background: done ? "var(--ok)" : active ? "var(--rose)" : "#fdfafa",
+              color: (done || active) ? "#fff" : "var(--ink-3)",
+              borderRight: i < 2 ? "1px solid var(--line)" : "none",
+              transition: "all 0.2s",
+              fontSize: 12.5, fontWeight: active ? 600 : 400,
+            }}>
+              <span style={{
+                width: 20, height: 20, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center",
+                background: (done || active) ? "rgba(255,255,255,0.25)" : "var(--line)",
+                color: (done || active) ? "#fff" : "var(--ink-3)",
+                fontSize: 11, fontWeight: 600, flexShrink: 0,
+              }}>{done ? "✓" : stepNum}</span>
+              <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label.slice(2)}</span>
+            </div>
+          );
+        })}
+      </div>
+
       <div className="form-hero">
         <div style={{ position: "relative", zIndex: 1 }}>
           <div className="fh-tag">Operative Note · Breast & Endocrine Surgery</div>
@@ -45,18 +90,35 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, position: "relative", zIndex: 1, flexWrap: "wrap" }}>
-          <button className="btn" onClick={onCancel}>ยกเลิก</button>
+          <button className="btn" onClick={onCancel}>← กลับ</button>
+
+          {/* Step 1: บันทึก */}
           <button
-            className={"btn" + (n.driveUploadedAt ? "" : " btn-locked")}
-            title={n.driveUploadedAt ? "Export PDF" : "กรุณา Upload to Drive ก่อน"}
-            onClick={() => onExportPdf(n)}
+            className={"btn btn-primary" + (hasUnsaved || !isSaved ? "" : " btn-ghost")}
+            onClick={save}
+            title={hasUnsaved ? "มีการแก้ไขที่ยังไม่ได้บันทึก" : "บันทึกข้อมูล"}
           >
-            <span>{n.driveUploadedAt ? "📄" : "🔒"}</span> Export PDF
+            {hasUnsaved && <span>●</span>} บันทึก {isSaved && !hasUnsaved && "✓"}
           </button>
-          <button className="btn btn-primary" style={{ background: "var(--rose)", color: "#fff", borderColor: "var(--rose)" }} onClick={() => onUploadDrive(n)}>
-            <span>☁</span> Upload to Drive
+
+          {/* Step 2: Upload to Drive */}
+          <button
+            className={"btn" + (canUpload ? " btn-primary" : " btn-locked")}
+            style={canUpload ? { background: "var(--rose)", color: "#fff", borderColor: "var(--rose)" } : {}}
+            title={!isSaved ? "กรุณา บันทึก ก่อน" : hasUnsaved ? "มีการแก้ไข กรุณา บันทึก ก่อน" : "Upload to Drive"}
+            onClick={() => { if (canUpload) onUploadDrive(n); }}
+          >
+            <span>☁</span> Upload to Drive {n.driveUploadedAt && "✓"}
           </button>
-          <button className="btn btn-primary" onClick={save}>บันทึก</button>
+
+          {/* Step 3: Export PDF */}
+          <button
+            className={"btn" + (canExport ? "" : " btn-locked")}
+            title={!canExport ? "กรุณา Upload to Drive ก่อน" : "Export PDF"}
+            onClick={() => { if (canExport) onExportPdf(n); }}
+          >
+            <span>{canExport ? "📄" : "🔒"}</span> Export PDF
+          </button>
         </div>
       </div>
 
