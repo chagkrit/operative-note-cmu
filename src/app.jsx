@@ -514,10 +514,12 @@ function App() {
     try {
       toast.push("กำลังเตรียมข้อมูล Excel…");
       const result = await driveUpsertExcel(note, DRIVE_FOLDER_ID);
-      const updated = { ...note, driveUploadedAt: new Date().toISOString(), driveFileId: result.id, driveFileLink: result.webViewLink };
+      const driveFields = { driveUploadedAt: new Date().toISOString(), driveFileId: result.id, driveFileLink: result.webViewLink };
+      const updated = { ...note, ...driveFields };
       upsertNote(updated);
       refresh();
-      if (editing && editing.id === note.id) setEditing(updated);
+      // Use functional update to avoid stale closure — always patch editing if same note
+      setEditing(prev => prev && prev.id === note.id ? { ...prev, ...driveFields } : prev);
       toast.push("อัปโหลด Excel สำเร็จ! บันทึกลง OperativeNotes_CMU.xlsx บน Drive แล้ว ☁", "ok");
     } catch (e) {
       console.error(e);
