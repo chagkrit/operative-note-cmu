@@ -237,8 +237,18 @@ function DriveSetupModal({ onClose, onSaved }) {
             <input type="text" value={val} onChange={e => setVal(e.target.value)} placeholder="xxxxxxxxxxxx.apps.googleusercontent.com" />
             <div className="hint">รูปแบบ: ลงท้ายด้วย .apps.googleusercontent.com</div>
           </div>
+          <div style={{ background: "#fff7ed", border: "1px solid #f5c78a", borderRadius: 8, padding: "12px 14px", marginTop: 10, fontSize: 12.5, lineHeight: 1.65 }}>
+            <b style={{ color: "#a85a1c" }}>⚠ พบ "Access blocked: has not completed the Google verification"?</b>
+            <br/>เนื่องจาก app อยู่ใน Testing mode (ยังไม่ผ่าน Google Verification) — ต้องเพิ่ม email ของผู้ใช้เป็น <b>Test user</b> ใน Google Cloud Console:<br/>
+            <ol style={{ margin: "6px 0 0", paddingLeft: 18, color: "var(--ink-2)" }}>
+              <li>ไปที่ <a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank" rel="noopener">GCP → OAuth consent screen</a></li>
+              <li>เลื่อนลงหา <b>Test users</b> → กด <b>+ ADD USERS</b></li>
+              <li>ใส่ email ที่ต้องการใช้งาน (เช่น <code>nansurg7@gmail.com</code>)</li>
+              <li>กด Save แล้วลองใหม่</li>
+            </ol>
+          </div>
           <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 10 }}>
-            <b>หมายเหตุสำคัญ:</b> เมื่ออัปโหลดครั้งแรก ระบบจะเปิด popup ให้ login ด้วย Google account (hnbcmu@gmail.com) และอนุญาตสิทธิ์ · Token จะเก็บใน browser นี้เท่านั้น · Scope ใช้ <code>drive.file</code> ซึ่งเข้าถึงได้เฉพาะไฟล์ที่ app นี้สร้าง (ปลอดภัย)
+            <b>หมายเหตุ:</b> เมื่ออัปโหลดครั้งแรก ระบบจะเปิด popup ให้ login ด้วย Google account และอนุญาตสิทธิ์ · Token จะเก็บใน browser นี้เท่านั้น · Scope ใช้ <code>drive.file</code> ซึ่งเข้าถึงได้เฉพาะไฟล์ที่ app นี้สร้าง (ปลอดภัย)
           </div>
         </div>
         <div className="modal-foot">
@@ -272,6 +282,7 @@ function App() {
   const [editing, setEditing] = React.useState(null);
   const [deleteConfirm, setDeleteConfirm] = React.useState(null);
   const [driveSetup, setDriveSetup] = React.useState(false);
+  const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const toast = useToast();
 
   const refresh = () => setNotes(loadAllNotes());
@@ -306,7 +317,13 @@ function App() {
     toast.push("ลบบันทึกเรียบร้อย", "ok");
   };
 
-  const handleExportPdf = (note) => exportPdf(note, LOGO_SRC);
+  const handleExportPdf = (note) => {
+    if (!note.driveUploadedAt) {
+      toast.push("กรุณา Upload to Drive ก่อน แล้วจึง Export PDF ได้", "err");
+      return;
+    }
+    exportPdf(note, LOGO_SRC);
+  };
 
   const handleUploadDrive = async (note) => {
     const cid = getClientId();
@@ -329,14 +346,18 @@ function App() {
       toast.push("อัปโหลดสำเร็จ! ไฟล์อยู่บน Drive แล้ว", "ok");
     } catch (e) {
       console.error(e);
-      if (String(e.message).includes("NO_CLIENT_ID")) {
+      const msg = String(e.message);
+      if (msg.includes("NO_CLIENT_ID")) {
         toast.push("กรุณาตั้งค่า Client ID", "err");
         setDriveSetup(true);
-      } else if (String(e.message).includes("AUTH_EXPIRED")) {
+      } else if (msg.includes("AUTH_EXPIRED")) {
         clearStoredToken();
         toast.push("Session หมดอายุ · กรุณาลองใหม่", "err");
+      } else if (msg.includes("access_denied") || msg.includes("not completed the Google verification")) {
+        setDriveSetup(true);
+        toast.push("Access denied — กรุณาเพิ่ม email ของคุณเป็น Test user ใน Google Cloud Console", "err");
       } else {
-        toast.push("อัปโหลดไม่สำเร็จ: " + e.message, "err");
+        toast.push("อัปโหลดไม่สำเร็จ: " + msg, "err");
       }
     }
   };
@@ -351,9 +372,15 @@ function App() {
     return <LoginScreen onLogin={() => setAuthed(true)} />;
   }
 
+  const closeSidebar = () => setSidebarOpen(false);
+  const navTo = (v) => { setView(v); if (v === "form") setEditing(emptyNote()); closeSidebar(); };
+
   return (
     <div className="app">
-      <aside className="sidebar">
+      {/* Overlay for mobile sidebar */}
+      <div className={"sidebar-overlay" + (sidebarOpen ? " open" : "")} onClick={closeSidebar} />
+
+      <aside className={"sidebar" + (sidebarOpen ? " open" : "")}>
         <div className="sb-head">
           <img src={LOGO_SRC} alt="logo" />
           <div>
@@ -362,15 +389,15 @@ function App() {
           </div>
         </div>
         <nav className="sb-nav">
-          <button className={view === "dashboard" ? "active" : ""} onClick={() => { setView("dashboard"); setEditing(null); }}>
+          <button className={view === "dashboard" ? "active" : ""} onClick={() => { setView("dashboard"); setEditing(null); closeSidebar(); }}>
             <span className="dot"></span> Dashboard
             <span style={{ marginLeft: "auto", fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--ink-4)" }}>{notes.length}</span>
           </button>
-          <button className={view === "form" ? "active" : ""} onClick={openNew}>
+          <button className={view === "form" ? "active" : ""} onClick={() => { openNew(); closeSidebar(); }}>
             <span className="dot"></span> New note
           </button>
           <div style={{ borderTop: "1px solid var(--line)", margin: "12px 0 8px" }} />
-          <button onClick={() => setDriveSetup(true)}>
+          <button onClick={() => { setDriveSetup(true); closeSidebar(); }}>
             <span className="dot"></span> Drive API settings
           </button>
           <button onClick={logout}>
@@ -384,6 +411,13 @@ function App() {
 
       <main className="main">
         <header className="topbar">
+          <button className="hamburger" onClick={() => setSidebarOpen(v => !v)} aria-label="เปิดเมนู">
+            <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+              <line x1="2" y1="4.5" x2="16" y2="4.5"/>
+              <line x1="2" y1="9" x2="16" y2="9"/>
+              <line x1="2" y1="13.5" x2="16" y2="13.5"/>
+            </svg>
+          </button>
           <span className="crumb">
             {view === "dashboard" && "HOME / DASHBOARD"}
             {view === "form" && (editing && editing.createdAt ? "HOME / NOTES / EDIT" : "HOME / NOTES / NEW")}
