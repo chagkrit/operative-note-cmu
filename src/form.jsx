@@ -24,8 +24,13 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
   React.useEffect(() => {
     setN(note);
     setIsSaved(!!(note.createdAt));
-    setHasUnsaved(false);
+    // Don't reset hasUnsaved when only driveUploadedAt changed (upload sync)
   }, [note.id]);
+
+  // Sync driveUploadedAt from parent without resetting unsaved flag
+  React.useEffect(() => {
+    setN(prev => ({ ...prev, driveUploadedAt: note.driveUploadedAt, driveFileId: note.driveFileId, driveFileLink: note.driveFileLink }));
+  }, [note.driveUploadedAt]);
 
   const update = (patch) => {
     const next = { ...n, ...patch };
@@ -333,7 +338,7 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
 
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", paddingBottom: 60 }}>
         <button className="btn" onClick={onCancel}>ยกเลิก</button>
-        <button className="btn" onClick={() => onExportPdf(n)}>Export PDF</button>
+        <button className={"btn" + (canExport ? "" : " btn-locked")} title={!canExport ? "กรุณา Upload to Drive ก่อน" : "Export PDF"} onClick={() => { if (canExport) onExportPdf(n); }}>Export PDF</button>
         <button className="btn" onClick={() => onUploadDrive(n)}>Upload to Drive</button>
         <button className="btn btn-primary" onClick={save}>บันทึกข้อมูล</button>
       </div>
