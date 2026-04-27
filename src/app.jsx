@@ -595,7 +595,8 @@ function App() {
   };
 
   const handleExportPdf = (note) => {
-    if (!note.driveUploadedAt) {
+    const locked = isNoteLocked(note);
+    if (!locked && !note.driveUploadedAt) {
       toast.push("ต้อง Upload to Drive สำเร็จก่อน จึงจะ Export PDF ได้", "err");
       return;
     }
