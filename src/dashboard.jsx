@@ -197,11 +197,16 @@ function Dashboard({ notes, onNew, onOpen, onDuplicate, onDelete, onExportPdf, o
                       <button className="btn btn-sm" onClick={() => tryOpen(n)} disabled={locked} style={locked ? { opacity: 0.4, cursor: "not-allowed" } : undefined}>
                         {locked ? "Locked" : "Open"}
                       </button>
-                      <button
-                        className={"btn btn-sm btn-ghost" + (n.driveUploadedAt ? "" : " btn-locked")}
-                        title={n.driveUploadedAt ? "Export PDF" : "Upload to Drive ก่อน"}
-                        onClick={() => onExportPdf(n)}
-                      >{n.driveUploadedAt ? "PDF" : "🔒"}</button>
+                      {(() => {
+                        const canPdf = locked || !!n.driveUploadedAt;
+                        return (
+                          <button
+                            className={"btn btn-sm btn-ghost" + (canPdf ? "" : " btn-locked")}
+                            title={canPdf ? "Export PDF" : "Upload to Drive ก่อน"}
+                            onClick={() => { if (canPdf) onExportPdf(n); }}
+                          >{canPdf ? "PDF" : "🔒"}</button>
+                        );
+                      })()}
                       <button className="btn btn-sm btn-ghost" onClick={() => onUploadDrive(n)} title="Upload to Drive">☁</button>
                       <button className="btn btn-sm btn-ghost" onClick={() => onDuplicate(n.id)} title="Duplicate" disabled={locked} style={locked ? { opacity: 0.4, cursor: "not-allowed" } : undefined}>⎘</button>
                       <button className="btn btn-sm btn-ghost btn-danger" onClick={() => onDelete(n.id)} title="Delete">✕</button>
