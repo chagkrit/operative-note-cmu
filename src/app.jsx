@@ -476,9 +476,53 @@ function ConfirmModal({ title, message, confirmLabel, danger, onCancel, onConfir
   );
 }
 
+// Convert Excel row (array) back to note object
+function rowToNote(row, headers) {
+  const note = {};
+  headers.forEach((h, i) => {
+    const col = EXCEL_COLUMNS.find(c => c.header === h);
+    if (!col) return;
+    const v = row[i] !== undefined ? String(row[i]) : "";
+    if (col.key === "complete") note[col.key] = v === "Yes";
+    else note[col.key] = v === "" ? undefined : v;
+  });
+  // Ensure id exists (use HN+date as fallback)
+  if (!note.id) note.id = `drive_${note.hn || "x"}_${note.date || "nodate"}_${Math.random().toString(36).slice(2,6)}`;
+  return note;
+}
+
+// Load all notes from Drive Excel file
+async function driveLoadNotes(folderId) {
+  await loadXlsx();
+  let token = getStoredToken();
+  if (!token) token = await requestAccessToken();
+  const at = token.accessToken;
+
+  // Find file
+  let fileId = getExcelFileId();
+  if (!fileId) {
+    fileId = await driveFindExcelFile(folderId, at);
+    if (fileId) setExcelFileId(fileId);
+  }
+  if (!fileId) return [];
+
+  const buf = await driveDownloadFile(fileId, at);
+  if (!buf) return [];
+
+  const wb = XLSX.read(new Uint8Array(buf), { type: "array" });
+  const ws = wb.Sheets[SHEET_NAME] || wb.Sheets[wb.SheetNames[0]];
+  const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+  if (data.length < 2) return [];
+
+  const headers = data[0].map(String);
+  return data.slice(1).filter(row => row.some(v => v !== undefined && v !== "")).map(row => rowToNote(row, headers));
+}
+
 function App() {
   const [authed, setAuthed] = React.useState(isLoggedIn());
   const [notes, setNotes] = React.useState(() => loadAllNotes());
+  const [driveNotes, setDriveNotes] = React.useState([]); // notes loaded from Drive Excel
+  const [driveLoading, setDriveLoading] = React.useState(false);
   const [view, setView] = React.useState("dashboard"); // dashboard | form
   const [editing, setEditing] = React.useState(null);
   const [deleteConfirm, setDeleteConfirm] = React.useState(null);
@@ -488,12 +532,44 @@ function App() {
 
   const refresh = () => setNotes(loadAllNotes());
 
+  // Merge local + drive notes, drive notes take priority (dedup by HN+date+name)
+  const allNotes = React.useMemo(() => {
+    if (driveNotes.length === 0) return notes;
+    const localOnly = notes.filter(ln =>
+      !driveNotes.some(dn =>
+        String(dn.hn||"") === String(ln.hn||"") &&
+        String(dn.date||"") === String(ln.date||"") &&
+        String(dn.name||"") === String(ln.name||"")
+      )
+    );
+    return [...driveNotes, ...localOnly].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  }, [notes, driveNotes]);
+
+  const handleSyncDrive = async () => {
+    setDriveLoading(true);
+    try {
+      const loaded = await driveLoadNotes(DRIVE_FOLDER_ID);
+      setDriveNotes(loaded);
+      toast.push(`โหลดจาก Drive สำเร็จ — ${loaded.length} รายการ ☁`, "ok");
+    } catch (e) {
+      const msg = String(e.message);
+      if (msg.includes("access_denied") || msg.includes("popup") || msg.includes("AUTH_EXPIRED")) {
+        clearStoredToken();
+        toast.push("กรุณา login Google แล้วลองใหม่", "err");
+      } else {
+        toast.push("โหลดจาก Drive ไม่สำเร็จ: " + msg, "err");
+      }
+    } finally {
+      setDriveLoading(false);
+    }
+  };
+
   const openNew = () => { setEditing(emptyNote()); setView("form"); };
   const LOCK_MS = 24 * 60 * 60 * 1000;
   const isNoteLocked = (n) => n && n.createdAt && (Date.now() - new Date(n.createdAt).getTime()) > LOCK_MS;
 
   const openNote = (id) => {
-    const n = notes.find(x => x.id === id);
+    const n = allNotes.find(x => x.id === id);
     if (n && !isNoteLocked(n)) { setEditing(n); setView("form"); }
   };
 
@@ -590,12 +666,15 @@ function App() {
         <nav className="sb-nav">
           <button className={view === "dashboard" ? "active" : ""} onClick={() => { setView("dashboard"); setEditing(null); closeSidebar(); }}>
             <span className="dot"></span> Dashboard
-            <span style={{ marginLeft: "auto", fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--ink-4)" }}>{notes.length}</span>
+            <span style={{ marginLeft: "auto", fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--ink-4)" }}>{allNotes.length}</span>
           </button>
           <button className={view === "form" ? "active" : ""} onClick={() => { openNew(); closeSidebar(); }}>
             <span className="dot"></span> New note
           </button>
           <div style={{ borderTop: "1px solid var(--line)", margin: "12px 0 8px" }} />
+          <button onClick={() => { handleSyncDrive(); closeSidebar(); }} disabled={driveLoading}>
+            <span className="dot"></span> {driveLoading ? "กำลังโหลด…" : "☁ Sync จาก Drive"}
+          </button>
           <button onClick={logout}>
             <span className="dot"></span> Logout
           </button>
@@ -629,13 +708,16 @@ function App() {
         <div className="content">
           {view === "dashboard" && (
             <Dashboard
-              notes={notes}
+              notes={allNotes}
               onNew={openNew}
               onOpen={openNote}
               onDuplicate={handleDuplicate}
               onDelete={handleDelete}
               onExportPdf={handleExportPdf}
               onUploadDrive={handleUploadDrive}
+              onSyncDrive={handleSyncDrive}
+              driveLoading={driveLoading}
+              hasDriveNotes={driveNotes.length > 0}
             />
           )}
           {view === "form" && editing && (
