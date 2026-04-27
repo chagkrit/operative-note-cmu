@@ -251,6 +251,18 @@ const EXCEL_FILENAME = "OperativeNotes_CMU.xlsx";
 const EXCEL_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const SHEET_NAME = "Operative Notes";
 
+// Search Drive for existing Excel file by name in the folder
+async function driveFindExcelFile(folderId, accessToken) {
+  const q = encodeURIComponent(`name='${EXCEL_FILENAME}' and '${folderId}' in parents and mimeType='${EXCEL_MIME}' and trashed=false`);
+  const resp = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=1`,
+    { headers: { Authorization: "Bearer " + accessToken } }
+  );
+  if (!resp.ok) return null;
+  const data = await resp.json();
+  return data.files && data.files.length > 0 ? data.files[0].id : null;
+}
+
 // Main function: upsert note row in the shared Excel file on Drive
 async function driveUpsertExcel(note, folderId) {
   await loadXlsx();
@@ -261,17 +273,28 @@ async function driveUpsertExcel(note, folderId) {
   const headers = EXCEL_COLUMNS.map(c => c.header);
   const newRow = noteToRow(note);
   let wb;
-  let existingFileId = getExcelFileId();
 
-  // Try to download existing workbook
+  // Step 1: resolve file ID — localStorage first, then search Drive by name
+  let existingFileId = getExcelFileId();
+  if (!existingFileId) {
+    existingFileId = await driveFindExcelFile(folderId, at);
+    if (existingFileId) setExcelFileId(existingFileId);
+  }
+
+  // Step 2: try to download existing workbook
   if (existingFileId) {
     const buf = await driveDownloadFile(existingFileId, at);
     if (buf) {
       wb = XLSX.read(new Uint8Array(buf), { type: "array" });
     } else {
-      // File gone — will create new
-      existingFileId = null;
-      setExcelFileId(null);
+      // File gone — search again before giving up
+      existingFileId = await driveFindExcelFile(folderId, at);
+      if (existingFileId) {
+        setExcelFileId(existingFileId);
+        const buf2 = await driveDownloadFile(existingFileId, at);
+        if (buf2) wb = XLSX.read(new Uint8Array(buf2), { type: "array" });
+      }
+      if (!wb) { existingFileId = null; setExcelFileId(null); }
     }
   }
 
@@ -279,7 +302,6 @@ async function driveUpsertExcel(note, folderId) {
     // Create brand-new workbook
     wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet([headers]);
-    // Style header row bold by adding cell metadata
     headers.forEach((_, ci) => {
       const cell = ws[XLSX.utils.encode_cell({ r: 0, c: ci })];
       if (cell) cell.s = { font: { bold: true } };
