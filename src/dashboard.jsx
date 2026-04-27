@@ -1,6 +1,6 @@
 // Dashboard view — combined with full list (All notes section removed)
 
-function Dashboard({ notes, onNew, onOpen, onDuplicate, onDelete, onExportPdf, onUploadDrive }) {
+function Dashboard({ notes, onNew, onOpen, onDuplicate, onDelete, onExportPdf, onUploadDrive, onSyncDrive, driveLoading, hasDriveNotes }) {
   const [q, setQ] = React.useState("");
   const [filter, setFilter] = React.useState("all");
   const [lockedMsg, setLockedMsg] = React.useState(null);
@@ -62,7 +62,10 @@ function Dashboard({ notes, onNew, onOpen, onDuplicate, onDelete, onExportPdf, o
           <h2>Dashboard</h2>
           <p>Breast & Endocrine Surgery CMU · บันทึกการผ่าตัดทั้งหมด</p>
         </div>
-        <div className="sec-head-right">
+        <div className="sec-head-right" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button className="btn btn-ghost" onClick={onSyncDrive} disabled={driveLoading} title="โหลดรายการทั้งหมดจาก Google Drive">
+            {driveLoading ? "กำลังโหลด…" : (hasDriveNotes ? "☁ Synced" : "☁ Sync จาก Drive")}
+          </button>
           <button className="btn btn-primary" onClick={onNew}>+ New operative note</button>
         </div>
       </div>
@@ -121,7 +124,7 @@ function Dashboard({ notes, onNew, onOpen, onDuplicate, onDelete, onExportPdf, o
       <div className="sec-head" style={{ marginTop: 10 }}>
         <div>
           <h2 style={{ fontSize: 24 }}>บันทึกการผ่าตัด</h2>
-          <p>{notes.length} รายการ · คลิกเพื่อเปิด / แก้ไข</p>
+          <p>{notes.length} รายการ{hasDriveNotes ? " (รวมจาก Drive ☁)" : " (เฉพาะเครื่องนี้)"} · คลิกเพื่อเปิด / แก้ไข</p>
         </div>
       </div>
 
