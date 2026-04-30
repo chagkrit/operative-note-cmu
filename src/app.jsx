@@ -596,7 +596,11 @@ function App() {
 
   const handleExportPdf = (note) => {
     const locked = isNoteLocked(note);
-    if (!locked && !note.driveUploadedAt) {
+    if (locked) {
+      toast.push("บันทึกนี้ครบ 24 ชั่วโมงแล้ว ไม่สามารถ Export PDF ได้", "err");
+      return;
+    }
+    if (!note.driveUploadedAt) {
       toast.push("ต้อง Upload to Drive สำเร็จก่อน จึงจะ Export PDF ได้", "err");
       return;
     }
