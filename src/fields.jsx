@@ -83,22 +83,55 @@ function Chips({ value, onChange, options }) {
   );
 }
 
+function compressImage(file, maxPx = 1200, quality = 0.75) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxPx || height > maxPx) {
+          if (width > height) { height = Math.round(height * maxPx / width); width = maxPx; }
+          else { width = Math.round(width * maxPx / height); height = maxPx; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        resolve(dataUrl);
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function ImageUpload({ value, onChange, label }) {
   const inputRef = useRef(null);
+  const [compressing, setCompressing] = React.useState(false);
   const pick = () => inputRef.current && inputRef.current.click();
   const handle = async (e) => {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      onChange({ dataUrl: reader.result, name: f.name });
-    };
-    reader.readAsDataURL(f);
+    setCompressing(true);
+    try {
+      const dataUrl = await compressImage(f);
+      onChange({ dataUrl, name: f.name });
+    } finally {
+      setCompressing(false);
+      e.target.value = "";
+    }
   };
   return (
-    <div className="spec-drop" onClick={pick}>
+    <div className="spec-drop" onClick={compressing ? undefined : pick} style={compressing ? { cursor: "wait", opacity: 0.7 } : undefined}>
       <input ref={inputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handle} />
-      {value ? (
+      {compressing ? (
+        <div className="spec-empty">
+          <div style={{ fontSize: 18, marginBottom: 6 }}>⏳</div>
+          <div style={{ fontSize: 11 }}>กำลังบีบรูป…</div>
+        </div>
+      ) : value ? (
         <>
           <img src={value.dataUrl} alt={value.name} />
           <button className="spec-rm" onClick={(e) => { e.stopPropagation(); onChange(null); }}>ลบ</button>
@@ -107,7 +140,7 @@ function ImageUpload({ value, onChange, label }) {
         <div className="spec-empty">
           <div style={{ fontSize: 22, marginBottom: 6 }}>＋</div>
           <div>{label || "เพิ่มรูป specimen"}</div>
-          <div style={{ fontSize: 10, color: "var(--ink-4)", marginTop: 4 }}>JPG / PNG</div>
+          <div style={{ fontSize: 10, color: "var(--ink-4)", marginTop: 4 }}>JPG / PNG · บีบอัตโนมัติ</div>
         </div>
       )}
     </div>
