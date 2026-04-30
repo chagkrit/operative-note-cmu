@@ -52,7 +52,7 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
   const LOCK_MS = 24 * 60 * 60 * 1000;
   const isLocked = !!(n.createdAt && (Date.now() - new Date(n.createdAt).getTime()) > LOCK_MS);
   const canUpload = isSaved && !hasUnsaved;
-  const canExport = isLocked || !!(n.driveUploadedAt);
+  const canExport = !isLocked && !!(n.driveUploadedAt);
 
   // Step indicator
   const step = !isSaved ? 1 : (hasUnsaved ? 1 : (!n.driveUploadedAt ? 2 : 3));
@@ -121,7 +121,7 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
           {/* Step 3: Export PDF */}
           <button
             className={"btn" + (canExport ? "" : " btn-locked")}
-            title={!canExport ? "กรุณา Upload to Drive ก่อน" : "Export PDF"}
+            title={isLocked ? "ครบ 24h แล้ว — ไม่สามารถ Export PDF ได้" : (!n.driveUploadedAt ? "กรุณา Upload to Drive ก่อน" : "Export PDF")}
             onClick={() => { if (canExport) onExportPdf(n); }}
           >
             <span>{canExport ? "📄" : "🔒"}</span> Export PDF
@@ -340,7 +340,7 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
 
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", paddingBottom: 60 }}>
         <button className="btn" onClick={onCancel}>ยกเลิก</button>
-        <button className={"btn" + (canExport ? "" : " btn-locked")} title={!canExport ? "กรุณา Upload to Drive ก่อน" : "Export PDF"} onClick={() => { if (canExport) onExportPdf(n); }}>Export PDF</button>
+        <button className={"btn" + (canExport ? "" : " btn-locked")} title={isLocked ? "ครบ 24h แล้ว — ไม่สามารถ Export PDF ได้" : (!n.driveUploadedAt ? "กรุณา Upload to Drive ก่อน" : "Export PDF")} onClick={() => { if (canExport) onExportPdf(n); }}>Export PDF</button>
         <button className="btn" onClick={() => onUploadDrive(n)}>Upload to Drive</button>
         <button className="btn btn-primary" onClick={save}>บันทึกข้อมูล</button>
       </div>
