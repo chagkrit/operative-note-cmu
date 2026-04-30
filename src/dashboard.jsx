@@ -198,11 +198,12 @@ function Dashboard({ notes, onNew, onOpen, onDuplicate, onDelete, onExportPdf, o
                         {locked ? "Locked" : "Open"}
                       </button>
                       {(() => {
-                        const canPdf = locked || !!n.driveUploadedAt;
+                        const canPdf = !locked && !!n.driveUploadedAt;
+                        const pdfTitle = locked ? "ครบ 24h แล้ว — ไม่สามารถ Export PDF ได้" : (!n.driveUploadedAt ? "Upload to Drive ก่อน" : "Export PDF");
                         return (
                           <button
                             className={"btn btn-sm btn-ghost" + (canPdf ? "" : " btn-locked")}
-                            title={canPdf ? "Export PDF" : "Upload to Drive ก่อน"}
+                            title={pdfTitle}
                             onClick={() => { if (canPdf) onExportPdf(n); }}
                           >{canPdf ? "PDF" : "🔒"}</button>
                         );
