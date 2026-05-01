@@ -275,30 +275,11 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
           </div>
         </div>
 
-        {/* Specimen */}
-        <div className="group full">
-          <div className="group-head">
-            <span className="gh-title">Specimen & Imaging</span>
-            <span className="gh-num">06 · Specimen</span>
-          </div>
-          <div className="group-body">
-            <Field label="Specimen characteristics">
-              <TextArea value={n.specimen} onChange={v => update({ specimen: v })} placeholder="เช่น Lt breast tissue, Lateral margin" />
-            </Field>
-            <Field label="Specimen / specimen radiogram image">
-              <div className="spec-uploads">
-                <ImageUpload value={n.specimen_image_1} onChange={v => update({ specimen_image_1: v })} label="รูปที่ 1" />
-                <ImageUpload value={n.specimen_image_2} onChange={v => update({ specimen_image_2: v })} label="รูปที่ 2 (radiogram)" />
-              </div>
-            </Field>
-          </div>
-        </div>
-
         {/* Post-op */}
         <div className="group full">
           <div className="group-head">
             <span className="gh-title">Intraoperative & Post-op</span>
-            <span className="gh-num">07 · Closing</span>
+            <span className="gh-num">06 · Closing</span>
           </div>
           <div className="group-body">
             <div className="row row-3">
