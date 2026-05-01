@@ -202,8 +202,11 @@ function noteToRow(note) {
 
 // Upload any binary blob to Drive (multipart), returns {id, webViewLink}
 async function driveUploadBlob(blob, mimeType, fileName, folderId, existingFileId, accessToken) {
+  // PATCH (update) must NOT include parents; POST (create) needs parents
   const metadata = { name: fileName, mimeType };
   if (!existingFileId && folderId) metadata.parents = [folderId];
+  // Strip undefined keys
+  Object.keys(metadata).forEach(k => metadata[k] === undefined && delete metadata[k]);
 
   const boundary = "xlsxbnd_" + Math.random().toString(36).slice(2);
   const buf = await blob.arrayBuffer();
@@ -282,17 +285,21 @@ async function driveUpsertExcel(note, folderId) {
   }
 
   // Step 2: try to download existing workbook
+  const readWorkbook = (buf) => XLSX.read(new Uint8Array(buf), { type: "array" });
   if (existingFileId) {
     const buf = await driveDownloadFile(existingFileId, at);
-    if (buf) {
-      wb = XLSX.read(new Uint8Array(buf), { type: "array" });
-    } else {
-      // File gone — search again before giving up
+    if (buf && buf.byteLength > 0) {
+      try { wb = readWorkbook(buf); } catch(e) { console.warn("XLSX parse error:", e); wb = null; }
+    }
+    if (!wb) {
+      // File gone or corrupt — search again before giving up
       existingFileId = await driveFindExcelFile(folderId, at);
       if (existingFileId) {
         setExcelFileId(existingFileId);
         const buf2 = await driveDownloadFile(existingFileId, at);
-        if (buf2) wb = XLSX.read(new Uint8Array(buf2), { type: "array" });
+        if (buf2 && buf2.byteLength > 0) {
+          try { wb = readWorkbook(buf2); } catch(e) { console.warn("XLSX parse error (retry):", e); }
+        }
       }
       if (!wb) { existingFileId = null; setExcelFileId(null); }
     }
@@ -507,9 +514,10 @@ async function driveLoadNotes(folderId) {
   if (!fileId) return [];
 
   const buf = await driveDownloadFile(fileId, at);
-  if (!buf) return [];
+  if (!buf || buf.byteLength === 0) return [];
 
-  const wb = XLSX.read(new Uint8Array(buf), { type: "array" });
+  let wb;
+  try { wb = XLSX.read(new Uint8Array(buf), { type: "array" }); } catch(e) { console.error("driveLoadNotes XLSX parse:", e); return []; }
   const ws = wb.Sheets[SHEET_NAME] || wb.Sheets[wb.SheetNames[0]];
   const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
   if (data.length < 2) return [];
@@ -617,6 +625,7 @@ function App() {
     try {
       toast.push("กำลังเตรียมข้อมูล Excel…");
       const result = await driveUpsertExcel(note, DRIVE_FOLDER_ID);
+      if (!result || !result.id) throw new Error("Drive ไม่ return file ID — ลองใหม่อีกครั้ง");
       const driveFields = { driveUploadedAt: new Date().toISOString(), driveFileId: result.id, driveFileLink: result.webViewLink };
       const updated = { ...note, ...driveFields };
       upsertNote(updated);
@@ -625,19 +634,22 @@ function App() {
       setEditing(prev => prev && prev.id === note.id ? { ...prev, ...driveFields } : prev);
       toast.push("อัปโหลด Excel สำเร็จ! บันทึกลง OperativeNotes_CMU.xlsx บน Drive แล้ว ☁", "ok");
     } catch (e) {
-      console.error(e);
-      const msg = String(e.message);
+      console.error("Upload error:", e);
+      const msg = String(e.message || e);
       if (msg.includes("NO_CLIENT_ID")) {
         toast.push("กรุณาตั้งค่า Client ID", "err");
         setDriveSetup(true);
       } else if (msg.includes("AUTH_EXPIRED")) {
         clearStoredToken();
-        toast.push("Session หมดอายุ · กรุณาลองใหม่", "err");
+        toast.push("Session หมดอายุ · กรุณากด Upload อีกครั้ง (จะ login ใหม่อัตโนมัติ)", "err");
       } else if (msg.includes("access_denied") || msg.includes("not completed the Google verification")) {
         setDriveSetup(true);
         toast.push("Access denied — กรุณาเพิ่ม email ของคุณเป็น Test user ใน Google Cloud Console", "err");
+      } else if (msg.includes("Upload failed")) {
+        // Show the raw Drive error so we can debug
+        toast.push("Drive error: " + msg.replace("Upload failed: ", "").slice(0, 120), "err");
       } else {
-        toast.push("อัปโหลดไม่สำเร็จ: " + msg, "err");
+        toast.push("อัปโหลดไม่สำเร็จ: " + msg.slice(0, 100), "err");
       }
     }
   };
