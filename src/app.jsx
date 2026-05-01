@@ -531,6 +531,8 @@ function App() {
   const [notes, setNotes] = React.useState(() => loadAllNotes());
   const [driveNotes, setDriveNotes] = React.useState([]); // notes loaded from Drive Excel
   const [driveLoading, setDriveLoading] = React.useState(false);
+  const [uploadingAll, setUploadingAll] = React.useState(false); // bulk upload progress
+  const [uploadAllProgress, setUploadAllProgress] = React.useState(null); // {done, total}
   const [view, setView] = React.useState("dashboard"); // dashboard | form
   const [editing, setEditing] = React.useState(null);
   const [deleteConfirm, setDeleteConfirm] = React.useState(null);
@@ -654,6 +656,49 @@ function App() {
     }
   };
 
+  // Bulk upload: push all local notes that haven't been uploaded to Drive yet
+  const handleUploadAllDrive = async () => {
+    const cid = getClientId();
+    if (!cid) { toast.push("กรุณาตั้งค่า Google Client ID ก่อน", "err"); setDriveSetup(true); return; }
+
+    // Only upload local notes that have no driveUploadedAt
+    const pending = notes.filter(n => !n.driveUploadedAt);
+    if (pending.length === 0) {
+      toast.push("ทุกบันทึกในเครื่องนี้อัปโหลด Drive แล้ว ✓", "ok");
+      return;
+    }
+
+    setUploadingAll(true);
+    setUploadAllProgress({ done: 0, total: pending.length });
+    let success = 0;
+    let fail = 0;
+
+    for (let i = 0; i < pending.length; i++) {
+      const note = pending[i];
+      try {
+        const result = await driveUpsertExcel(note, DRIVE_FOLDER_ID);
+        if (!result || !result.id) throw new Error("ไม่ได้รับ file ID จาก Drive");
+        const driveFields = { driveUploadedAt: new Date().toISOString(), driveFileId: result.id, driveFileLink: result.webViewLink };
+        upsertNote({ ...note, ...driveFields });
+        success++;
+      } catch (e) {
+        console.warn("Upload all — failed for note:", note.id, e);
+        fail++;
+      }
+      setUploadAllProgress({ done: i + 1, total: pending.length });
+    }
+
+    refresh();
+    setUploadingAll(false);
+    setUploadAllProgress(null);
+
+    if (fail === 0) {
+      toast.push(`อัปโหลดสำเร็จทั้งหมด ${success} รายการ ☁`, "ok");
+    } else {
+      toast.push(`อัปโหลดสำเร็จ ${success} รายการ · ล้มเหลว ${fail} รายการ`, fail > 0 ? "err" : "ok");
+    }
+  };
+
   const logout = () => {
     setLoggedIn(false);
     clearStoredToken();
@@ -726,6 +771,7 @@ function App() {
           {view === "dashboard" && (
             <Dashboard
               notes={allNotes}
+              localNotes={notes}
               onNew={openNew}
               onOpen={openNote}
               onDuplicate={handleDuplicate}
@@ -733,7 +779,10 @@ function App() {
               onExportPdf={handleExportPdf}
               onUploadDrive={handleUploadDrive}
               onSyncDrive={handleSyncDrive}
+              onUploadAllDrive={handleUploadAllDrive}
               driveLoading={driveLoading}
+              uploadingAll={uploadingAll}
+              uploadAllProgress={uploadAllProgress}
               hasDriveNotes={driveNotes.length > 0}
             />
           )}
