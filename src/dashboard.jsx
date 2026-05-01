@@ -1,6 +1,6 @@
 // Dashboard view — combined with full list (All notes section removed)
 
-function Dashboard({ notes, onNew, onOpen, onDuplicate, onDelete, onExportPdf, onUploadDrive, onSyncDrive, driveLoading, hasDriveNotes }) {
+function Dashboard({ notes, localNotes, onNew, onOpen, onDuplicate, onDelete, onExportPdf, onUploadDrive, onSyncDrive, onUploadAllDrive, driveLoading, uploadingAll, uploadAllProgress, hasDriveNotes }) {
   const [q, setQ] = React.useState("");
   const [filter, setFilter] = React.useState("all");
   const [lockedMsg, setLockedMsg] = React.useState(null);
@@ -88,10 +88,33 @@ function Dashboard({ notes, onNew, onOpen, onDuplicate, onDelete, onExportPdf, o
           <h2>Dashboard</h2>
           <p>Breast & Endocrine Surgery CMU · บันทึกการผ่าตัดทั้งหมด</p>
         </div>
-        <div className="sec-head-right" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button className="btn btn-ghost" onClick={onSyncDrive} disabled={driveLoading} title="โหลดรายการทั้งหมดจาก Google Drive">
+        <div className="sec-head-right" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <button className="btn btn-ghost" onClick={onSyncDrive} disabled={driveLoading || uploadingAll} title="โหลดรายการทั้งหมดจาก Google Drive">
             {driveLoading ? "กำลังโหลด…" : (hasDriveNotes ? "☁ Synced" : "☁ Sync จาก Drive")}
           </button>
+          {(() => {
+            const pendingCount = (localNotes || []).filter(n => !n.driveUploadedAt).length;
+            if (uploadingAll && uploadAllProgress) {
+              return (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#fdfafa", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 12px", fontSize: 12.5 }}>
+                  <div style={{ width: 80, background: "#f3ecee", borderRadius: 3, height: 6, overflow: "hidden" }}>
+                    <div style={{ background: "var(--rose)", height: "100%", width: `${(uploadAllProgress.done / uploadAllProgress.total) * 100}%`, transition: "width 0.2s" }} />
+                  </div>
+                  <span style={{ fontFamily: "var(--font-mono)", color: "var(--ink-2)" }}>{uploadAllProgress.done}/{uploadAllProgress.total}</span>
+                  <span style={{ color: "var(--ink-3)" }}>กำลังอัปโหลด…</span>
+                </div>
+              );
+            }
+            if (pendingCount > 0) {
+              return (
+                <button className="btn btn-ghost" onClick={onUploadAllDrive} disabled={driveLoading} title={`อัปโหลด ${pendingCount} รายการที่ยังไม่มีบน Drive`}
+                  style={{ borderColor: "var(--warn)", color: "var(--warn)" }}>
+                  ☁ Upload ทั้งหมด ({pendingCount})
+                </button>
+              );
+            }
+            return null;
+          })()}
           <button className="btn btn-primary" onClick={onNew}>+ New operative note</button>
         </div>
       </div>
