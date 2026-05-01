@@ -73,16 +73,6 @@ function PdfSheet({ note, logoSrc }) {
       <div className="pdf-section-title">Operative procedure</div>
       <div className="pdf-block">{v(note.opprocedure)}</div>
 
-      <div className="pdf-section-title">Specimen Characteristics</div>
-      <div className="pdf-block">{v(note.specimen)}</div>
-
-      {(note.specimen_image_1 || note.specimen_image_2) && (
-        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-          {note.specimen_image_1 && <img className="pdf-spec-img" src={note.specimen_image_1.dataUrl} alt="specimen 1" />}
-          {note.specimen_image_2 && <img className="pdf-spec-img" src={note.specimen_image_2.dataUrl} alt="specimen 2" />}
-        </div>
-      )}
-
       <div className="pdf-row" style={{ marginTop: 10 }}>
         <span className="pdf-lbl">Estimated blood loss:</span><span className="pdf-val">{v(note.ebl)} ml</span>
         <span className="pdf-lbl">IV fluids:</span><span className="pdf-val">{v(note.fluid)} ml</span>
