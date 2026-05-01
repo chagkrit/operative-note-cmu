@@ -11,10 +11,18 @@ function Dashboard({ notes, onNew, onOpen, onDuplicate, onDelete, onExportPdf, o
     if (!n.createdAt) return false;
     return (Date.now() - new Date(n.createdAt).getTime()) > LOCK_MS;
   };
-  const hoursLeft = (n) => {
+  // Returns minutes left (not hours) for finer display; null if no createdAt
+  const timeLeft = (n) => {
     if (!n.createdAt) return null;
     const left = LOCK_MS - (Date.now() - new Date(n.createdAt).getTime());
-    return left > 0 ? Math.max(1, Math.round(left / (60 * 60 * 1000))) : 0;
+    return left > 0 ? left : 0;
+  };
+  const formatTimeLeft = (ms) => {
+    if (ms <= 0) return null;
+    const h = Math.floor(ms / (60 * 60 * 1000));
+    const m = Math.floor((ms % (60 * 60 * 1000)) / 60000);
+    if (h > 0) return `${h}ชม. ${m}น.`;
+    return `${m}น.`;
   };
   const tryOpen = (n) => {
     if (isLocked(n)) {
@@ -22,6 +30,24 @@ function Dashboard({ notes, onNew, onOpen, onDuplicate, onDelete, onExportPdf, o
       return;
     }
     onOpen(n.id);
+  };
+
+  // Privacy helpers
+  // ชื่อเต็ม + นามสกุลเฉพาะอักษรแรก (รองรับทั้งไทยและอังกฤษ)
+  const maskName = (fullName) => {
+    if (!fullName) return null;
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length === 1) return fullName;
+    const firstName = parts[0];
+    const lastInitial = [...parts[parts.length - 1]][0]; // first Unicode char of last word
+    return `${firstName} ${lastInitial}.`;
+  };
+  // HN: แสดง 3 ตัวแรก + xxxx
+  const maskHN = (hn) => {
+    if (!hn) return "—";
+    const s = String(hn);
+    if (s.length <= 3) return s;
+    return s.slice(0, 3) + "x".repeat(Math.min(4, s.length - 3));
   };
 
   const stats = React.useMemo(() => {
@@ -163,14 +189,19 @@ function Dashboard({ notes, onNew, onOpen, onDuplicate, onDelete, onExportPdf, o
             <tbody>
               {filtered.map(n => {
                 const locked = isLocked(n);
-                const hrs = hoursLeft(n);
+                const msLeft = timeLeft(n);
+                const timeLeftStr = msLeft !== null ? formatTimeLeft(msLeft) : null;
+                const displayName = maskName(n.name);
+                const displayHN = maskHN(n.hn);
                 return (
                 <tr key={n.id} style={locked ? { opacity: 0.75 } : undefined}>
                   <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--ink-2)" }} className="col-hide-mobile">{n.date || "—"}</td>
                   <td>
-                    <div style={{ fontWeight: 500 }}>{n.name || <span style={{ color: "var(--ink-4)" }}>(ไม่ระบุชื่อ)</span>}</div>
+                    <div style={{ fontWeight: 500 }}>
+                      {displayName || <span style={{ color: "var(--ink-4)" }}>(ไม่ระบุชื่อ)</span>}
+                    </div>
                     <div style={{ fontSize: 11.5, color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
-                      HN {n.hn || "—"} · {n.date || "?"} · {n.age || "?"}ปี
+                      HN {displayHN} · {n.date || "?"} · {n.age || "?"}ปี
                     </div>
                   </td>
                   <td className="col-hide-mobile">
@@ -185,17 +216,23 @@ function Dashboard({ notes, onNew, onOpen, onDuplicate, onDelete, onExportPdf, o
                       : (n.complete
                         ? <span className="pill pill-pink">Complete</span>
                         : <span className="pill pill-gray">Draft</span>)}
-                    {!locked && n.createdAt && hrs !== null && hrs > 0 && (
+                    {!locked && timeLeftStr && (
                       <div style={{ fontSize: 10, color: "var(--warn)", marginTop: 3, fontFamily: "var(--font-mono)" }}>
-                        ⏱ {hrs}h left
+                        ⏱ {timeLeftStr} left
                       </div>
                     )}
                     {n.driveUploadedAt && <div style={{ fontSize: 10, color: "var(--ok)", marginTop: 3, fontFamily: "var(--font-mono)" }}>☁ on Drive</div>}
                   </td>
                   <td style={{ textAlign: "right" }}>
                     <div style={{ display: "inline-flex", gap: 4 }}>
-                      <button className="btn btn-sm" onClick={() => tryOpen(n)} disabled={locked} style={locked ? { opacity: 0.4, cursor: "not-allowed" } : undefined}>
-                        {locked ? "Locked" : "Open"}
+                      <button
+                        className={"btn btn-sm" + (locked ? " btn-locked" : "")}
+                        onClick={() => tryOpen(n)}
+                        disabled={locked}
+                        title={locked ? "ครบ 24h แล้ว — ไม่สามารถเปิดแก้ไขได้" : "เปิดบันทึก"}
+                        style={locked ? { opacity: 0.4, cursor: "not-allowed" } : undefined}
+                      >
+                        {locked ? "🔒" : "Open"}
                       </button>
                       {(() => {
                         const canPdf = !locked && !!n.driveUploadedAt;
@@ -226,7 +263,7 @@ function Dashboard({ notes, onNew, onOpen, onDuplicate, onDelete, onExportPdf, o
             <div className="modal-head"><h3>🔒 บันทึกถูกล็อกแล้ว</h3></div>
             <div className="modal-body"><p style={{ margin: 0 }}>{lockedMsg}</p>
               <p style={{ marginTop: 10, fontSize: 12, color: "var(--ink-3)" }}>
-                ยังสามารถ export PDF หรืออัปโหลดไป Drive ได้ตามปกติ — แต่ไม่สามารถเปิดแก้ไขเนื้อหาได้แล้ว
+                ยังสามารถอัปโหลดไป Drive ได้ตามปกติ — แต่ไม่สามารถเปิดแก้ไขหรือ Export PDF ได้แล้ว
               </p>
             </div>
             <div className="modal-foot">
