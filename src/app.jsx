@@ -178,6 +178,8 @@ const EXCEL_COLUMNS = [
   { key: "opfinding",      header: "Op Finding" },
   { key: "opprocedure",    header: "Op Procedure" },
   { key: "specimen",       header: "Specimen" },
+  { key: "specimen_image_1_link", header: "Specimen Image 1" },
+  { key: "specimen_image_2_link", header: "Specimen Image 2" },
   { key: "ebl",            header: "EBL (ml)" },
   { key: "fluid",          header: "IV Fluid (ml)" },
   { key: "bloodtx",        header: "Blood Tx (unit)" },
@@ -191,6 +193,64 @@ const EXCEL_COLUMNS = [
   { key: "driveUploadedAt",header: "Drive Uploaded At" },
 ];
 
+const EXCEL_HEADER_ALIASES = {
+  "date": "Date",
+  "hn": "HN",
+  "name": "Patient Name",
+  "age": "Age",
+  "gender": "Gender",
+  "ward": "Ward",
+  "surgeon": "Surgeon",
+  "firstassistant": "1st Assistant",
+  "secondassistant": "2nd Assistant",
+  "thirdassistant": "3rd Assistant",
+  "anesthesia": "Anesthesia",
+  "scrub": "Scrub Nurse",
+  "opstart": "Op Start",
+  "opend": "Op End",
+  "totaloptime": "Total Op Time (min)",
+  "room": "OR Room",
+  "side": "Side",
+  "preopdx": "Pre-Op Dx",
+  "MMG BI-RADs": "MMG BIRADS",
+  "MMG BIRADs": "MMG BIRADS",
+  "mmg_birads": "MMG BIRADS",
+  "CA Breast ถ้าได้ neoadjuvant ก่อนผ่าตัด มีคิว RT หรือยัง?": "Neoadj RT",
+  "neoadj_rt": "Neoadj RT",
+  "US thyroid risk": "US Thyroid Risk",
+  "us_thyroid_risk": "US Thyroid Risk",
+  "operation": "Operation",
+  "postopdx": "Post-Op Dx",
+  "position": "Position",
+  "incision": "Incision",
+  "opfinding": "Op Finding",
+  "opprocedure": "Op Procedure",
+  "specimen": "Specimen",
+  "Operation started": "Op Start",
+  "Operation ended": "Op End",
+  "Total op time": "Total Op Time (min)",
+  "Total operative time (min)": "Total Op Time (min)",
+  "Operating room": "OR Room",
+  "Estimated blood loss (ml)": "EBL (ml)",
+  "ebl": "EBL (ml)",
+  "IV fluids (ml)": "IV Fluid (ml)",
+  "fluid": "IV Fluid (ml)",
+  "Blood products (ml)": "Blood Tx (unit)",
+  "bloodtx": "Blood Tx (unit)",
+  "drain": "Drain",
+  "complication": "Complication",
+  "patientcondition": "Patient Condition",
+  "signature": "Signature",
+  "Complete?": "Complete",
+  "complete": "Complete",
+  "specimen image": "Specimen Image 1",
+};
+
+function canonicalHeader(header) {
+  const h = String(header || "").trim();
+  return EXCEL_HEADER_ALIASES[h] || h;
+}
+
 function noteToRow(note) {
   return EXCEL_COLUMNS.map(c => {
     const v = note[c.key];
@@ -198,6 +258,99 @@ function noteToRow(note) {
     if (typeof v === "boolean") return v ? "Yes" : "No";
     return String(v);
   });
+}
+
+function normalizeWorksheetSchema(wb, wsName, desiredName) {
+  const headers = EXCEL_COLUMNS.map(c => c.header);
+  const ws = wb.Sheets[wsName];
+  const data = ws ? XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) : [];
+  const existingHeaders = (data[0] || []).map(canonicalHeader);
+  const headerIndex = new Map();
+  existingHeaders.forEach((h, i) => {
+    if (h === "Specimen Image 1" && headerIndex.has("Specimen Image 1") && !headerIndex.has("Specimen Image 2")) {
+      h = "Specimen Image 2";
+    }
+    if (h && !headerIndex.has(h)) headerIndex.set(h, i);
+  });
+
+  const alreadyCurrent =
+    existingHeaders.length >= headers.length &&
+    headers.every((h, i) => existingHeaders[i] === h);
+  if (alreadyCurrent) return ws;
+
+  const migratedRows = data.slice(1).map(row =>
+    headers.map(header => {
+      const idx = headerIndex.get(header);
+      return idx === undefined ? "" : (row[idx] ?? "");
+    })
+  );
+  const nextWs = XLSX.utils.aoa_to_sheet([headers, ...migratedRows]);
+  if (wsName !== desiredName) {
+    delete wb.Sheets[wsName];
+    const nameIdx = wb.SheetNames.indexOf(wsName);
+    if (nameIdx >= 0) wb.SheetNames[nameIdx] = desiredName;
+  } else if (!wb.SheetNames.includes(desiredName)) {
+    wb.SheetNames.push(desiredName);
+  }
+  wb.Sheets[desiredName] = nextWs;
+  return nextWs;
+}
+
+function dataUrlToBlob(dataUrl) {
+  const [meta, data] = String(dataUrl || "").split(",");
+  if (!meta || !data) return null;
+  const mime = (meta.match(/^data:([^;]+);base64$/) || [])[1] || "image/jpeg";
+  const raw = atob(data);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+function safeFilePart(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[\\/:*?"<>|#%{}]/g, "_")
+    .replace(/\s+/g, "_")
+    .slice(0, 80) || "note";
+}
+
+function imageExt(mimeType, originalName) {
+  const fromName = String(originalName || "").match(/\.([a-z0-9]+)$/i);
+  if (fromName) return fromName[1].toLowerCase();
+  if (mimeType === "image/png") return "png";
+  if (mimeType === "image/webp") return "webp";
+  return "jpg";
+}
+
+async function uploadSpecimenImages(note, folderId, accessToken) {
+  const patch = {};
+  for (const idx of [1, 2]) {
+    const key = `specimen_image_${idx}`;
+    const image = note[key];
+    if (!image || !image.dataUrl) continue;
+
+    const blob = dataUrlToBlob(image.dataUrl);
+    if (!blob) continue;
+
+    const ext = imageExt(blob.type, image.name);
+    const fileName = [
+      safeFilePart(note.date),
+      safeFilePart(note.hn),
+      safeFilePart(note.name),
+      `specimen_${idx}.${ext}`,
+    ].join("_");
+    const result = await driveUploadBlob(
+      blob,
+      blob.type || "image/jpeg",
+      fileName,
+      folderId,
+      note[`${key}_fileId`] || null,
+      accessToken
+    );
+    patch[`${key}_fileId`] = result.id || null;
+    patch[`${key}_link`] = result.webViewLink || "";
+  }
+  return Object.keys(patch).length ? { ...note, ...patch } : note;
 }
 
 // Upload any binary blob to Drive (multipart), returns {id, webViewLink}
@@ -273,8 +426,9 @@ async function driveUpsertExcel(note, folderId) {
   if (!token) token = await requestAccessToken();
   const at = token.accessToken;
 
+  const noteForExcel = await uploadSpecimenImages(note, folderId, at);
   const headers = EXCEL_COLUMNS.map(c => c.header);
-  const newRow = noteToRow(note);
+  const newRow = noteToRow(noteForExcel);
   let wb;
 
   // Step 1: resolve file ID — localStorage first, then search Drive by name
@@ -316,10 +470,11 @@ async function driveUpsertExcel(note, folderId) {
     XLSX.utils.book_append_sheet(wb, ws, SHEET_NAME);
   }
 
-  const ws = wb.Sheets[SHEET_NAME] || wb.Sheets[wb.SheetNames[0]];
+  const wsName = wb.Sheets[SHEET_NAME] ? SHEET_NAME : wb.SheetNames[0];
+  const ws = normalizeWorksheetSchema(wb, wsName, SHEET_NAME);
 
   // Check if this note's row already exists (match by HN + date + name)
-  const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+  const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
   const hnColIdx = headers.indexOf("HN");
   const dateColIdx = headers.indexOf("Date");
   const nameColIdx = headers.indexOf("Patient Name");
@@ -327,9 +482,9 @@ async function driveUpsertExcel(note, folderId) {
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     if (
-      String(row[hnColIdx] || "") === String(note.hn || "") &&
-      String(row[dateColIdx] || "") === String(note.date || "") &&
-      String(row[nameColIdx] || "") === String(note.name || "")
+      String(row[hnColIdx] || "") === String(noteForExcel.hn || "") &&
+      String(row[dateColIdx] || "") === String(noteForExcel.date || "") &&
+      String(row[nameColIdx] || "") === String(noteForExcel.name || "")
     ) {
       existingRowIdx = i;
       break;
@@ -366,7 +521,17 @@ async function driveUpsertExcel(note, folderId) {
   // Save file ID for next time
   if (result.id) setExcelFileId(result.id);
 
-  return result;
+  const notePatch = {};
+  [
+    "specimen_image_1_fileId",
+    "specimen_image_1_link",
+    "specimen_image_2_fileId",
+    "specimen_image_2_link",
+  ].forEach(key => {
+    if (noteForExcel[key] !== note[key]) notePatch[key] = noteForExcel[key];
+  });
+
+  return { ...result, notePatch };
 }
 
 // Build a PDF blob from the note using html2pdf
@@ -486,11 +651,15 @@ function ConfirmModal({ title, message, confirmLabel, danger, onCancel, onConfir
 // Convert Excel row (array) back to note object
 function rowToNote(row, headers) {
   const note = {};
+  const seen = {};
   headers.forEach((h, i) => {
-    const col = EXCEL_COLUMNS.find(c => c.header === h);
+    let canonical = canonicalHeader(h);
+    if (canonical === "Specimen Image 1" && seen[canonical]) canonical = "Specimen Image 2";
+    seen[canonical] = (seen[canonical] || 0) + 1;
+    const col = EXCEL_COLUMNS.find(c => c.header === canonical);
     if (!col) return;
     const v = row[i] !== undefined ? String(row[i]) : "";
-    if (col.key === "complete") note[col.key] = v === "Yes";
+    if (col.key === "complete") note[col.key] = ["yes", "true", "complete", "1"].includes(v.trim().toLowerCase());
     else note[col.key] = v === "" ? undefined : v;
   });
   // Ensure id exists (use HN+date as fallback)
@@ -555,6 +724,20 @@ function App() {
     return [...driveNotes, ...localOnly].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   }, [notes, driveNotes]);
 
+  const prepareUploadNote = (note, uploadedAt) => {
+    const current =
+      notes.find(n => n.id === note.id) ||
+      driveNotes.find(n => n.id === note.id) ||
+      null;
+    const now = new Date().toISOString();
+    const merged = { ...(current || {}), ...note, driveUploadedAt: uploadedAt };
+    return {
+      ...merged,
+      createdAt: merged.createdAt || (current && current.createdAt) || now,
+      updatedAt: merged.updatedAt || (current && current.updatedAt) || now,
+    };
+  };
+
   const handleSyncDrive = async () => {
     setDriveLoading(true);
     try {
@@ -588,7 +771,8 @@ function App() {
     refresh();
     toast.push("บันทึกข้อมูลเรียบร้อย ✓ — กด Upload to Drive เพื่อสำรองข้อมูล", "ok");
     // อยู่หน้า form ต่อ แต่ update note ให้มี createdAt/updatedAt (unlock Upload)
-    setEditing({ ...note, createdAt: saved.createdAt || note.createdAt || new Date().toISOString(), updatedAt: saved.updatedAt });
+    setEditing(saved);
+    return saved;
   };
 
   const handleDuplicate = (id) => {
@@ -626,14 +810,21 @@ function App() {
     }
     try {
       toast.push("กำลังเตรียมข้อมูล Excel…");
-      const result = await driveUpsertExcel(note, DRIVE_FOLDER_ID);
+      const uploadedAt = new Date().toISOString();
+      const noteForDrive = prepareUploadNote(note, uploadedAt);
+      const result = await driveUpsertExcel(noteForDrive, DRIVE_FOLDER_ID);
       if (!result || !result.id) throw new Error("Drive ไม่ return file ID — ลองใหม่อีกครั้ง");
-      const driveFields = { driveUploadedAt: new Date().toISOString(), driveFileId: result.id, driveFileLink: result.webViewLink };
-      const updated = { ...note, ...driveFields };
+      const driveFields = {
+        driveUploadedAt: uploadedAt,
+        driveFileId: result.id,
+        driveFileLink: result.webViewLink,
+        ...(result.notePatch || {}),
+      };
+      const updated = { ...noteForDrive, ...driveFields };
       upsertNote(updated);
       refresh();
       // Use functional update to avoid stale closure — always patch editing if same note
-      setEditing(prev => prev && prev.id === note.id ? { ...prev, ...driveFields } : prev);
+      setEditing(prev => prev && prev.id === note.id ? { ...prev, ...updated } : prev);
       toast.push("อัปโหลด Excel สำเร็จ! บันทึกลง OperativeNotes_CMU.xlsx บน Drive แล้ว ☁", "ok");
     } catch (e) {
       console.error("Upload error:", e);
@@ -676,10 +867,17 @@ function App() {
     for (let i = 0; i < pending.length; i++) {
       const note = pending[i];
       try {
-        const result = await driveUpsertExcel(note, DRIVE_FOLDER_ID);
+        const uploadedAt = new Date().toISOString();
+        const noteForDrive = prepareUploadNote(note, uploadedAt);
+        const result = await driveUpsertExcel(noteForDrive, DRIVE_FOLDER_ID);
         if (!result || !result.id) throw new Error("ไม่ได้รับ file ID จาก Drive");
-        const driveFields = { driveUploadedAt: new Date().toISOString(), driveFileId: result.id, driveFileLink: result.webViewLink };
-        upsertNote({ ...note, ...driveFields });
+        const driveFields = {
+          driveUploadedAt: uploadedAt,
+          driveFileId: result.id,
+          driveFileLink: result.webViewLink,
+          ...(result.notePatch || {}),
+        };
+        upsertNote({ ...noteForDrive, ...driveFields });
         success++;
       } catch (e) {
         console.warn("Upload all — failed for note:", note.id, e);

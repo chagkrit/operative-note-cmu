@@ -29,8 +29,19 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
 
   // Sync driveUploadedAt from parent without resetting unsaved flag
   React.useEffect(() => {
-    setN(prev => ({ ...prev, driveUploadedAt: note.driveUploadedAt, driveFileId: note.driveFileId, driveFileLink: note.driveFileLink }));
-  }, [note.driveUploadedAt]);
+    setN(prev => prev.id === note.id ? ({
+      ...prev,
+      createdAt: note.createdAt,
+      updatedAt: note.updatedAt,
+      driveUploadedAt: note.driveUploadedAt,
+      driveFileId: note.driveFileId,
+      driveFileLink: note.driveFileLink,
+      specimen_image_1_fileId: note.specimen_image_1_fileId,
+      specimen_image_1_link: note.specimen_image_1_link,
+      specimen_image_2_fileId: note.specimen_image_2_fileId,
+      specimen_image_2_link: note.specimen_image_2_link,
+    }) : prev);
+  }, [note.id, note.createdAt, note.updatedAt, note.driveUploadedAt, note.driveFileId, note.driveFileLink, note.specimen_image_1_fileId, note.specimen_image_1_link, note.specimen_image_2_fileId, note.specimen_image_2_link]);
 
   const update = (patch) => {
     const next = { ...n, ...patch };
@@ -43,7 +54,8 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
   };
 
   const save = () => {
-    onSave(n);
+    const saved = onSave(n);
+    if (saved) setN(saved);
     setIsSaved(true);
     setHasUnsaved(false);
   };
@@ -272,6 +284,29 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
             <Field label="Operative procedure">
               <TextArea large value={n.opprocedure} onChange={v => update({ opprocedure: v })} placeholder="ขั้นตอนการผ่าตัดโดยละเอียด..." rows={10} />
             </Field>
+            <Field label="Specimen">
+              <TextArea value={n.specimen} onChange={v => update({ specimen: v })} placeholder="รายการ specimen ที่ส่งตรวจ..." rows={4} />
+            </Field>
+            <div className="spec-uploads">
+              <ImageUpload
+                value={n.specimen_image_1}
+                label="เพิ่มรูป specimen 1"
+                onChange={v => update({
+                  specimen_image_1: v,
+                  specimen_image_1_fileId: null,
+                  specimen_image_1_link: null,
+                })}
+              />
+              <ImageUpload
+                value={n.specimen_image_2}
+                label="เพิ่มรูป specimen 2"
+                onChange={v => update({
+                  specimen_image_2: v,
+                  specimen_image_2_fileId: null,
+                  specimen_image_2_link: null,
+                })}
+              />
+            </div>
           </div>
         </div>
 
@@ -322,7 +357,13 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", paddingBottom: 60 }}>
         <button className="btn" onClick={onCancel}>ยกเลิก</button>
         <button className={"btn" + (canExport ? "" : " btn-locked")} title={isLocked ? "ครบ 24h แล้ว — ไม่สามารถ Export PDF ได้" : (!n.driveUploadedAt ? "กรุณา Upload to Drive ก่อน" : "Export PDF")} onClick={() => { if (canExport) onExportPdf(n); }}>Export PDF</button>
-        <button className="btn" onClick={() => onUploadDrive(n)}>Upload to Drive</button>
+        <button
+          className={"btn" + (canUpload ? "" : " btn-locked")}
+          title={!isSaved ? "กรุณา บันทึก ก่อน" : hasUnsaved ? "มีการแก้ไข กรุณา บันทึก ก่อน" : "Upload to Drive"}
+          onClick={() => { if (canUpload) onUploadDrive(n); }}
+        >
+          Upload to Drive
+        </button>
         <button className="btn btn-primary" onClick={save}>บันทึกข้อมูล</button>
       </div>
     </>

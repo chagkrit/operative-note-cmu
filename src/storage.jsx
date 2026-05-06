@@ -22,9 +22,16 @@ function saveAllNotes(notes) {
 function upsertNote(note) {
   const all = loadAllNotes();
   const idx = all.findIndex(n => n.id === note.id);
-  const updated = { ...note, updatedAt: new Date().toISOString() };
+  const now = new Date().toISOString();
+  const existing = idx >= 0 ? all[idx] : null;
+  const updated = {
+    ...(existing || {}),
+    ...note,
+    createdAt: note.createdAt || (existing && existing.createdAt) || now,
+    updatedAt: now,
+  };
   if (idx >= 0) all[idx] = updated;
-  else all.unshift({ ...updated, createdAt: new Date().toISOString() });
+  else all.unshift(updated);
   saveAllNotes(all);
   return updated;
 }
@@ -44,7 +51,13 @@ function duplicateNote(id) {
     name: src.name + " (copy)",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    driveUploadedAt: null
+    driveUploadedAt: null,
+    driveFileId: null,
+    driveFileLink: null,
+    specimen_image_1_fileId: null,
+    specimen_image_1_link: null,
+    specimen_image_2_fileId: null,
+    specimen_image_2_link: null
   };
   all.unshift(copy);
   saveAllNotes(all);
@@ -89,6 +102,10 @@ function emptyNote() {
     specimen: "",
     specimen_image_1: null, // {dataUrl, name}
     specimen_image_2: null,
+    specimen_image_1_fileId: null,
+    specimen_image_1_link: null,
+    specimen_image_2_fileId: null,
+    specimen_image_2_link: null,
     ebl: "",
     fluid: "",
     bloodtx: "0",
