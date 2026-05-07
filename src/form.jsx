@@ -62,7 +62,9 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
 
   // Lock states
   const LOCK_MS = 24 * 60 * 60 * 1000;
-  const isLocked = !!(n.createdAt && (Date.now() - new Date(n.createdAt).getTime()) > LOCK_MS);
+  const lockBaseRaw = n.createdAt || n.date;
+  const lockBaseTime = lockBaseRaw ? new Date(lockBaseRaw).getTime() : null;
+  const isLocked = !!(Number.isFinite(lockBaseTime) && (Date.now() - lockBaseTime) > LOCK_MS);
   const canUpload = isSaved && !hasUnsaved;
   const canExport = !isLocked && !!(n.driveUploadedAt);
 

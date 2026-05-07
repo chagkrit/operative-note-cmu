@@ -815,7 +815,17 @@ function App() {
 
   const openNew = () => { setEditing(emptyNote()); setView("form"); };
   const LOCK_MS = 24 * 60 * 60 * 1000;
-  const isNoteLocked = (n) => n && n.createdAt && (Date.now() - new Date(n.createdAt).getTime()) > LOCK_MS;
+  const noteLockBaseTime = (n) => {
+    if (!n) return null;
+    const raw = n.createdAt || n.date;
+    if (!raw) return null;
+    const t = new Date(raw).getTime();
+    return Number.isFinite(t) ? t : null;
+  };
+  const isNoteLocked = (n) => {
+    const t = noteLockBaseTime(n);
+    return !!t && (Date.now() - t) > LOCK_MS;
+  };
 
   const openNote = (id) => {
     const n = allNotes.find(x => x.id === id);

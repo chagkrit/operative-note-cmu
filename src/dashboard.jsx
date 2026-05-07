@@ -5,16 +5,25 @@ function Dashboard({ notes, localNotes, onNew, onOpen, onDuplicate, onDelete, on
   const [filter, setFilter] = React.useState("all");
   const [lockedMsg, setLockedMsg] = React.useState(null);
 
-  // Lock helpers: note becomes read-only 24h after createdAt
+  // Lock helpers: note becomes read-only 24h after createdAt.
+  // Older Drive rows may not have Created At, so fall back to operative date.
   const LOCK_MS = 24 * 60 * 60 * 1000;
-  const isLocked = (n) => {
-    if (!n.createdAt) return false;
-    return (Date.now() - new Date(n.createdAt).getTime()) > LOCK_MS;
+  const lockBaseTime = (n) => {
+    const raw = n.createdAt || n.date;
+    if (!raw) return null;
+    const t = new Date(raw).getTime();
+    return Number.isFinite(t) ? t : null;
   };
-  // Returns minutes left (not hours) for finer display; null if no createdAt
+  const isLocked = (n) => {
+    const t = lockBaseTime(n);
+    if (!t) return false;
+    return (Date.now() - t) > LOCK_MS;
+  };
+  // Returns minutes left (not hours) for finer display; null if no lock base exists
   const timeLeft = (n) => {
-    if (!n.createdAt) return null;
-    const left = LOCK_MS - (Date.now() - new Date(n.createdAt).getTime());
+    const t = lockBaseTime(n);
+    if (!t) return null;
+    const left = LOCK_MS - (Date.now() - t);
     return left > 0 ? left : 0;
   };
   const formatTimeLeft = (ms) => {
@@ -264,6 +273,8 @@ function Dashboard({ notes, localNotes, onNew, onOpen, onDuplicate, onDelete, on
                           <button
                             className={"btn btn-sm btn-ghost" + (canPdf ? "" : " btn-locked")}
                             title={pdfTitle}
+                            disabled={!canPdf}
+                            style={!canPdf ? { opacity: 0.4, cursor: "not-allowed" } : undefined}
                             onClick={() => { if (canPdf) onExportPdf(n); }}
                           >{canPdf ? "PDF" : "🔒"}</button>
                         );
