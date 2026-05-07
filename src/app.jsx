@@ -61,7 +61,8 @@ function LoginScreen({ onLogin }) {
 
 // ---- Google Drive OAuth (browser-configurable) ----
 const GOOGLE_CLIENT_ID_KEY = "op_notes_gcid_v1";
-const GOOGLE_TOKEN_KEY = "op_notes_gtoken_v1";
+const GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
+const GOOGLE_TOKEN_KEY = "op_notes_gtoken_v2";
 
 const DEFAULT_CLIENT_ID = "929532184474-1jresva7l73jnj96sfll47jum48sggt8.apps.googleusercontent.com";
 function getClientId() {
@@ -107,7 +108,7 @@ async function requestAccessToken() {
   return new Promise((resolve, reject) => {
     const client = google.accounts.oauth2.initTokenClient({
       client_id: clientId,
-      scope: "https://www.googleapis.com/auth/drive.file",
+      scope: GOOGLE_DRIVE_SCOPE,
       callback: (resp) => {
         if (resp.error) { reject(new Error(resp.error)); return; }
         const token = {
@@ -654,7 +655,7 @@ function DriveSetupModal({ onClose, onSaved }) {
               <li>เปิด <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a> แล้ว login ด้วย hnbcmu@gmail.com</li>
               <li>สร้าง Project ใหม่ (เช่น "HNB Operative Note")</li>
               <li>เมนู <b>APIs & Services → Library</b> → เปิด <b>Google Drive API</b></li>
-              <li>เมนู <b>APIs & Services → OAuth consent screen</b> → เลือก External → ใส่ชื่อ app และ email → เพิ่ม scope <code>drive.file</code> → เพิ่ม test user <code>hnbcmu@gmail.com</code></li>
+              <li>เมนู <b>APIs & Services → OAuth consent screen</b> → เลือก External → ใส่ชื่อ app และ email → เพิ่ม scope <code>drive</code> → เพิ่ม test user <code>hnbcmu@gmail.com</code></li>
               <li>เมนู <b>Credentials → Create credentials → OAuth client ID</b> → ประเภท <b>Web application</b></li>
               <li>ใน <b>Authorized JavaScript origins</b> ใส่ URL ที่เปิดเว็บ (เช่น <code>{window.location.origin}</code>)</li>
               <li>คัดลอก <b>Client ID</b> มาวางด้านล่าง</li>
@@ -676,7 +677,7 @@ function DriveSetupModal({ onClose, onSaved }) {
             </ol>
           </div>
           <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 10 }}>
-            <b>หมายเหตุ:</b> เมื่ออัปโหลดครั้งแรก ระบบจะเปิด popup ให้ login ด้วย Google account และอนุญาตสิทธิ์ · Token จะเก็บใน browser นี้เท่านั้น · Scope ใช้ <code>drive.file</code> ซึ่งเข้าถึงได้เฉพาะไฟล์ที่ app นี้สร้าง (ปลอดภัย)
+            <b>หมายเหตุ:</b> เมื่ออัปโหลดครั้งแรก ระบบจะเปิด popup ให้ login ด้วย Google account และอนุญาตสิทธิ์ · Token จะเก็บใน browser นี้เท่านั้น · Scope ใช้ <code>drive</code> เพื่อให้เว็บอ่าน/เขียนไฟล์ <code>OperativeNotes_CMU.xlsx</code> เดิมในโฟลเดอร์ Drive ได้
           </div>
         </div>
         <div className="modal-foot">
