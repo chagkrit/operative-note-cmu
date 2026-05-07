@@ -147,6 +147,7 @@ function loadXlsx() {
 const DRIVE_EXCEL_FILE_ID_KEY = "op_notes_excel_fid_v1";
 function getExcelFileId() { try { return localStorage.getItem(DRIVE_EXCEL_FILE_ID_KEY) || null; } catch { return null; } }
 function setExcelFileId(id) { try { localStorage.setItem(DRIVE_EXCEL_FILE_ID_KEY, id); } catch {} }
+function clearExcelFileId() { try { localStorage.removeItem(DRIVE_EXCEL_FILE_ID_KEY); } catch {} }
 
 // Excel column headers — order matters, matches note fields
 const EXCEL_COLUMNS = [
@@ -407,16 +408,73 @@ const EXCEL_FILENAME = "OperativeNotes_CMU.xlsx";
 const EXCEL_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const SHEET_NAME = "Operative Notes";
 
-// Search Drive for existing Excel file by name in the folder
-async function driveFindExcelFile(folderId, accessToken) {
-  const q = encodeURIComponent(`name='${EXCEL_FILENAME}' and '${folderId}' in parents and mimeType='${EXCEL_MIME}' and trashed=false`);
+function isDuplicateExcelName(name) {
+  return /^OperativeNotes_CMU \(\d+\)\.xlsx$/.test(String(name || ""));
+}
+
+async function driveGetFileMetadata(fileId, accessToken) {
   const resp = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=1`,
+    `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,parents,trashed,modifiedTime`,
     { headers: { Authorization: "Bearer " + accessToken } }
   );
   if (!resp.ok) return null;
+  return await resp.json();
+}
+
+// Search Drive for the canonical Excel file and accidental duplicate names in the target folder.
+async function driveFindExcelFiles(folderId, accessToken) {
+  const q = encodeURIComponent(`name contains 'OperativeNotes_CMU' and '${folderId}' in parents and mimeType='${EXCEL_MIME}' and trashed=false`);
+  const resp = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=100`,
+    { headers: { Authorization: "Bearer " + accessToken } }
+  );
+  if (!resp.ok) return [];
   const data = await resp.json();
-  return data.files && data.files.length > 0 ? data.files[0].id : null;
+  return (data.files || []).filter(f => f.name === EXCEL_FILENAME || isDuplicateExcelName(f.name));
+}
+
+async function driveTrashFile(fileId, accessToken) {
+  const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+    method: "PATCH",
+    headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json" },
+    body: JSON.stringify({ trashed: true }),
+  });
+  if (!resp.ok) console.warn("Unable to trash duplicate Excel file:", await resp.text());
+}
+
+async function driveResolveExcelFile(folderId, accessToken) {
+  const storedId = getExcelFileId();
+  const files = await driveFindExcelFiles(folderId, accessToken);
+  const canonical = files.find(f => f.name === EXCEL_FILENAME) || null;
+  const duplicates = files.filter(f => isDuplicateExcelName(f.name));
+
+  if (canonical) {
+    setExcelFileId(canonical.id);
+    await Promise.all(duplicates.filter(f => f.id !== canonical.id).map(f => driveTrashFile(f.id, accessToken)));
+    return canonical.id;
+  }
+
+  if (storedId) {
+    const meta = await driveGetFileMetadata(storedId, accessToken);
+    const inFolder = meta && Array.isArray(meta.parents) && meta.parents.includes(folderId);
+    if (meta && !meta.trashed && meta.mimeType === EXCEL_MIME && inFolder && (meta.name === EXCEL_FILENAME || isDuplicateExcelName(meta.name))) {
+      setExcelFileId(storedId);
+      return storedId;
+    }
+    clearExcelFileId();
+  }
+
+  const duplicate = duplicates[0] || null;
+  if (duplicate) {
+    setExcelFileId(duplicate.id);
+    return duplicate.id;
+  }
+
+  return null;
+}
+
+async function driveFindExcelFile(folderId, accessToken) {
+  return await driveResolveExcelFile(folderId, accessToken);
 }
 
 // Main function: upsert note row in the shared Excel file on Drive
@@ -431,12 +489,9 @@ async function driveUpsertExcel(note, folderId) {
   const newRow = noteToRow(noteForExcel);
   let wb;
 
-  // Step 1: resolve file ID — localStorage first, then search Drive by name
-  let existingFileId = getExcelFileId();
-  if (!existingFileId) {
-    existingFileId = await driveFindExcelFile(folderId, at);
-    if (existingFileId) setExcelFileId(existingFileId);
-  }
+  // Step 1: resolve the canonical file on Drive. Never trust a cached ID until
+  // Drive confirms it belongs to the intended workbook/folder.
+  let existingFileId = await driveResolveExcelFile(folderId, at);
 
   // Step 2: try to download existing workbook
   const readWorkbook = (buf) => XLSX.read(new Uint8Array(buf), { type: "array" });
@@ -455,7 +510,7 @@ async function driveUpsertExcel(note, folderId) {
           try { wb = readWorkbook(buf2); } catch(e) { console.warn("XLSX parse error (retry):", e); }
         }
       }
-      if (!wb) { existingFileId = null; setExcelFileId(null); }
+      if (!wb) { existingFileId = null; clearExcelFileId(); }
     }
   }
 
