@@ -1,6 +1,6 @@
 // Main app shell with login gate + Drive OAuth
 
-const { loadAllNotes, upsertNote, deleteNote, duplicateNote, emptyNote } = window.OP_STORE;
+const { loadAllNotes, upsertNote, duplicateNote, emptyNote } = window.OP_STORE;
 const { DRIVE_FOLDER_URL, DRIVE_FOLDER_ID } = window.OP_CONST;
 const LOGO_SRC = "assets/logo.jpg";
 
@@ -689,21 +689,6 @@ function DriveSetupModal({ onClose, onSaved }) {
   );
 }
 
-function ConfirmModal({ title, message, confirmLabel, danger, onCancel, onConfirm }) {
-  return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-head"><h3>{title}</h3></div>
-        <div className="modal-body"><p style={{ margin: 0 }}>{message}</p></div>
-        <div className="modal-foot">
-          <button className="btn" onClick={onCancel}>ยกเลิก</button>
-          <button className={"btn " + (danger ? "btn-danger" : "btn-primary")} onClick={onConfirm}>{confirmLabel}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // Convert Excel row (array) back to note object
 function rowToNote(row, headers) {
   const note = {};
@@ -760,7 +745,6 @@ function App() {
   const [uploadAllProgress, setUploadAllProgress] = React.useState(null); // {done, total}
   const [view, setView] = React.useState("dashboard"); // dashboard | form
   const [editing, setEditing] = React.useState(null);
-  const [deleteConfirm, setDeleteConfirm] = React.useState(null);
   const [driveSetup, setDriveSetup] = React.useState(false);
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const toast = useToast();
@@ -844,14 +828,6 @@ function App() {
   const handleDuplicate = (id) => {
     const copy = duplicateNote(id);
     if (copy) { refresh(); toast.push("สร้างสำเนาเรียบร้อย"); setEditing(copy); setView("form"); }
-  };
-
-  const handleDelete = (id) => setDeleteConfirm(id);
-  const confirmDelete = () => {
-    deleteNote(deleteConfirm);
-    setDeleteConfirm(null);
-    refresh();
-    toast.push("ลบบันทึกเรียบร้อย", "ok");
   };
 
   const handleExportPdf = (note) => {
@@ -1039,7 +1015,6 @@ function App() {
               onNew={openNew}
               onOpen={openNote}
               onDuplicate={handleDuplicate}
-              onDelete={handleDelete}
               onExportPdf={handleExportPdf}
               onUploadDrive={handleUploadDrive}
               onSyncDrive={handleSyncDrive}
@@ -1066,16 +1041,6 @@ function App() {
       </main>
 
       {driveSetup && <DriveSetupModal onClose={() => setDriveSetup(false)} />}
-      {deleteConfirm && (
-        <ConfirmModal
-          title="ยืนยันการลบ"
-          message="ต้องการลบบันทึกนี้จากเครื่องใช่หรือไม่? ข้อมูลจะไม่สามารถกู้คืนได้"
-          confirmLabel="ลบ"
-          danger
-          onCancel={() => setDeleteConfirm(null)}
-          onConfirm={confirmDelete}
-        />
-      )}
 
       {toast.host}
     </div>
