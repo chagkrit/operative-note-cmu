@@ -316,6 +316,14 @@ function safeFilePart(value) {
     .slice(0, 80) || "note";
 }
 
+function patientFolderName(note) {
+  const name = String(note.name || "").trim();
+  if (name) return name;
+  const hn = String(note.hn || "").trim();
+  if (hn) return hn;
+  return "Unknown Patient";
+}
+
 function imageExt(mimeType, originalName) {
   const fromName = String(originalName || "").match(/\.([a-z0-9]+)$/i);
   if (fromName) return fromName[1].toLowerCase();
@@ -324,8 +332,69 @@ function imageExt(mimeType, originalName) {
   return "jpg";
 }
 
+async function driveFindFolderByName(parentFolderId, folderName, accessToken) {
+  const escapedName = String(folderName || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const q = encodeURIComponent(
+    `mimeType='application/vnd.google-apps.folder' and name='${escapedName}' and '${parentFolderId}' in parents and trashed=false`
+  );
+  const resp = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,webViewLink)&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+    { headers: { Authorization: "Bearer " + accessToken } }
+  );
+  if (!resp.ok) {
+    const err = await resp.text();
+    if (resp.status === 401) { clearStoredToken(); throw new Error("AUTH_EXPIRED: " + err); }
+    throw new Error("Find folder failed: " + err);
+  }
+  const data = await resp.json();
+  return (data.files || [])[0] || null;
+}
+
+async function driveCreateFolder(parentFolderId, folderName, accessToken) {
+  const resp = await fetch(
+    "https://www.googleapis.com/drive/v3/files?fields=id,name,webViewLink&supportsAllDrives=true",
+    {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + accessToken,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: folderName,
+        mimeType: "application/vnd.google-apps.folder",
+        parents: [parentFolderId],
+      }),
+    }
+  );
+  if (!resp.ok) {
+    const err = await resp.text();
+    if (resp.status === 401) { clearStoredToken(); throw new Error("AUTH_EXPIRED: " + err); }
+    throw new Error("Create folder failed: " + err);
+  }
+  return await resp.json();
+}
+
+async function driveEnsurePatientFolder(note, rootFolderId, accessToken) {
+  if (note.patientFolderId) {
+    return {
+      id: note.patientFolderId,
+      name: patientFolderName(note),
+      webViewLink: note.patientFolderLink || `https://drive.google.com/drive/folders/${note.patientFolderId}`,
+    };
+  }
+
+  const folderName = patientFolderName(note);
+  const found = await driveFindFolderByName(rootFolderId, folderName, accessToken);
+  if (found) return found;
+  return await driveCreateFolder(rootFolderId, folderName, accessToken);
+}
+
 async function uploadSpecimenImages(note, folderId, accessToken) {
-  const patch = {};
+  const patientFolder = await driveEnsurePatientFolder(note, folderId, accessToken);
+  const patch = {
+    patientFolderId: patientFolder.id || null,
+    patientFolderLink: patientFolder.webViewLink || (patientFolder.id ? `https://drive.google.com/drive/folders/${patientFolder.id}` : ""),
+  };
   for (const idx of [1, 2]) {
     const key = `specimen_image_${idx}`;
     const image = note[key];
@@ -345,7 +414,7 @@ async function uploadSpecimenImages(note, folderId, accessToken) {
       blob,
       blob.type || "image/jpeg",
       fileName,
-      folderId,
+      patientFolder.id,
       note[`${key}_fileId`] || null,
       accessToken
     );
@@ -579,6 +648,8 @@ async function driveUpsertExcel(note, folderId) {
 
   const notePatch = {};
   [
+    "patientFolderId",
+    "patientFolderLink",
     "specimen_image_1_fileId",
     "specimen_image_1_link",
     "specimen_image_2_fileId",

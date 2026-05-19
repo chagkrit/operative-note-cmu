@@ -36,12 +36,14 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
       driveUploadedAt: note.driveUploadedAt,
       driveFileId: note.driveFileId,
       driveFileLink: note.driveFileLink,
+      patientFolderId: note.patientFolderId,
+      patientFolderLink: note.patientFolderLink,
       specimen_image_1_fileId: note.specimen_image_1_fileId,
       specimen_image_1_link: note.specimen_image_1_link,
       specimen_image_2_fileId: note.specimen_image_2_fileId,
       specimen_image_2_link: note.specimen_image_2_link,
     }) : prev);
-  }, [note.id, note.createdAt, note.updatedAt, note.driveUploadedAt, note.driveFileId, note.driveFileLink, note.specimen_image_1_fileId, note.specimen_image_1_link, note.specimen_image_2_fileId, note.specimen_image_2_link]);
+  }, [note.id, note.createdAt, note.updatedAt, note.driveUploadedAt, note.driveFileId, note.driveFileLink, note.patientFolderId, note.patientFolderLink, note.specimen_image_1_fileId, note.specimen_image_1_link, note.specimen_image_2_fileId, note.specimen_image_2_link]);
 
   const update = (patch) => {
     const next = { ...n, ...patch };

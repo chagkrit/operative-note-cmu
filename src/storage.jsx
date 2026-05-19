@@ -54,6 +54,8 @@ function duplicateNote(id) {
     driveUploadedAt: null,
     driveFileId: null,
     driveFileLink: null,
+    patientFolderId: null,
+    patientFolderLink: null,
     specimen_image_1_fileId: null,
     specimen_image_1_link: null,
     specimen_image_2_fileId: null,
@@ -102,6 +104,8 @@ function emptyNote() {
     specimen: "",
     specimen_image_1: null, // {dataUrl, name}
     specimen_image_2: null,
+    patientFolderId: null,
+    patientFolderLink: null,
     specimen_image_1_fileId: null,
     specimen_image_1_link: null,
     specimen_image_2_fileId: null,
