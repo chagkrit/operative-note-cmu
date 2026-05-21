@@ -83,22 +83,50 @@ function Chips({ value, onChange, options }) {
   );
 }
 
-function compressImage(file, maxPx = 1200, quality = 0.75) {
+const SPECIMEN_IMAGE_MAX_BYTES = 450 * 1024;
+const SPECIMEN_IMAGE_MIN_PX = 650;
+
+function dataUrlBytes(dataUrl) {
+  const comma = String(dataUrl || "").indexOf(",");
+  const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : "";
+  return Math.ceil(base64.length * 3 / 4);
+}
+
+function drawCompressedDataUrl(img, maxPx, quality) {
+  let { width, height } = img;
+  if (width > maxPx || height > maxPx) {
+    if (width > height) { height = Math.round(height * maxPx / width); width = maxPx; }
+    else { width = Math.round(width * maxPx / height); height = maxPx; }
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+function compressImage(file, maxPx = 1000, quality = 0.72) {
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const img = new Image();
       img.onload = () => {
-        let { width, height } = img;
-        if (width > maxPx || height > maxPx) {
-          if (width > height) { height = Math.round(height * maxPx / width); width = maxPx; }
-          else { width = Math.round(width * maxPx / height); height = maxPx; }
+        let targetPx = maxPx;
+        let q = quality;
+        let dataUrl = drawCompressedDataUrl(img, targetPx, q);
+
+        for (let i = 0; i < 8 && dataUrlBytes(dataUrl) > SPECIMEN_IMAGE_MAX_BYTES; i++) {
+          if (q > 0.48) {
+            q = Math.max(0.48, q - 0.08);
+          } else if (targetPx > SPECIMEN_IMAGE_MIN_PX) {
+            targetPx = Math.max(SPECIMEN_IMAGE_MIN_PX, Math.round(targetPx * 0.82));
+            q = 0.62;
+          } else {
+            break;
+          }
+          dataUrl = drawCompressedDataUrl(img, targetPx, q);
         }
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+
         resolve(dataUrl);
       };
       img.src = ev.target.result;

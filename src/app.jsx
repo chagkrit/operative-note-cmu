@@ -426,40 +426,47 @@ async function uploadSpecimenImages(note, folderId, accessToken) {
 
 // Upload any binary blob to Drive (multipart), returns {id, webViewLink}
 async function driveUploadBlob(blob, mimeType, fileName, folderId, existingFileId, accessToken) {
-  // PATCH (update) must NOT include parents; POST (create) needs parents
-  const metadata = { name: fileName, mimeType };
-  if (!existingFileId && folderId) metadata.parents = [folderId];
-  // Strip undefined keys
-  Object.keys(metadata).forEach(k => metadata[k] === undefined && delete metadata[k]);
+  const uploadOnce = async (fileId) => {
+    // PATCH (update) must NOT include parents; POST (create) needs parents
+    const metadata = { name: fileName, mimeType };
+    if (!fileId && folderId) metadata.parents = [folderId];
+    Object.keys(metadata).forEach(k => metadata[k] === undefined && delete metadata[k]);
 
-  const boundary = "xlsxbnd_" + Math.random().toString(36).slice(2);
-  const buf = await blob.arrayBuffer();
-  const enc = new TextEncoder();
-  const pre = enc.encode(
-    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`
-  );
-  const post = enc.encode(`\r\n--${boundary}--`);
-  const body = new Uint8Array(pre.byteLength + buf.byteLength + post.byteLength);
-  body.set(pre, 0);
-  body.set(new Uint8Array(buf), pre.byteLength);
-  body.set(post, pre.byteLength + buf.byteLength);
+    const boundary = "xlsxbnd_" + Math.random().toString(36).slice(2);
+    const buf = await blob.arrayBuffer();
+    const enc = new TextEncoder();
+    const pre = enc.encode(
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`
+    );
+    const post = enc.encode(`\r\n--${boundary}--`);
+    const body = new Uint8Array(pre.byteLength + buf.byteLength + post.byteLength);
+    body.set(pre, 0);
+    body.set(new Uint8Array(buf), pre.byteLength);
+    body.set(post, pre.byteLength + buf.byteLength);
 
-  const url = existingFileId
-    ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=multipart&fields=id,name,webViewLink`
-    : `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink`;
-  const method = existingFileId ? "PATCH" : "POST";
+    const url = fileId
+      ? `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart&fields=id,name,webViewLink&supportsAllDrives=true`
+      : `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink&supportsAllDrives=true`;
+    const method = fileId ? "PATCH" : "POST";
 
-  const resp = await fetch(url, {
-    method,
-    headers: { Authorization: "Bearer " + accessToken, "Content-Type": `multipart/related; boundary=${boundary}` },
-    body,
-  });
-  if (!resp.ok) {
-    const err = await resp.text();
-    if (resp.status === 401) { clearStoredToken(); throw new Error("AUTH_EXPIRED: " + err); }
-    throw new Error("Upload failed: " + err);
+    const resp = await fetch(url, {
+      method,
+      headers: { Authorization: "Bearer " + accessToken, "Content-Type": `multipart/related; boundary=${boundary}` },
+      body,
+    });
+    if (!resp.ok) return { ok: false, status: resp.status, error: await resp.text() };
+    return { ok: true, data: await resp.json() };
+  };
+
+  let result = await uploadOnce(existingFileId || null);
+  if (!result.ok && existingFileId && (result.status === 403 || result.status === 404)) {
+    result = await uploadOnce(null);
   }
-  return await resp.json();
+  if (!result.ok) {
+    if (result.status === 401) { clearStoredToken(); throw new Error("AUTH_EXPIRED: " + result.error); }
+    throw new Error("Upload failed: " + result.error);
+  }
+  return result.data;
 }
 
 // Download file bytes from Drive
