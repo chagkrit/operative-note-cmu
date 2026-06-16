@@ -292,23 +292,19 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
               <TextArea value={n.specimen} onChange={v => update({ specimen: v })} placeholder="รายการ specimen ที่ส่งตรวจ..." rows={4} />
             </Field>
             <div className="spec-uploads">
+              {/* fileId/link are left untouched here on purpose: the Drive upload step
+                  uses them to overwrite the same file on replace, and to trash the old
+                  file when the image is removed — clearing them here would orphan/duplicate
+                  files on Drive instead. */}
               <ImageUpload
                 value={n.specimen_image_1}
                 label="เพิ่มรูป specimen 1"
-                onChange={v => update({
-                  specimen_image_1: v,
-                  specimen_image_1_fileId: null,
-                  specimen_image_1_link: null,
-                })}
+                onChange={v => update({ specimen_image_1: v })}
               />
               <ImageUpload
                 value={n.specimen_image_2}
                 label="เพิ่มรูป specimen 2"
-                onChange={v => update({
-                  specimen_image_2: v,
-                  specimen_image_2_fileId: null,
-                  specimen_image_2_link: null,
-                })}
+                onChange={v => update({ specimen_image_2: v })}
               />
             </div>
           </div>

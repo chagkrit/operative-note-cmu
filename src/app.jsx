@@ -415,7 +415,18 @@ async function uploadSpecimenImages(note, folderId, accessToken) {
   for (const idx of [1, 2]) {
     const key = `specimen_image_${idx}`;
     const image = note[key];
-    if (!image || !image.dataUrl) continue;
+    const existingFileId = note[`${key}_fileId`] || null;
+
+    if (!image || !image.dataUrl) {
+      // Image was removed locally — trash the previously uploaded Drive file
+      // instead of leaving it behind as an orphan/duplicate.
+      if (existingFileId) {
+        await driveTrashFile(existingFileId, accessToken);
+        patch[`${key}_fileId`] = null;
+        patch[`${key}_link`] = "";
+      }
+      continue;
+    }
 
     const blob = dataUrlToBlob(image.dataUrl);
     if (!blob) continue;
@@ -434,7 +445,7 @@ async function uploadSpecimenImages(note, folderId, accessToken) {
         blob.type || "image/jpeg",
         fileName,
         patientFolder.id,
-        note[`${key}_fileId`] || null,
+        existingFileId,
         accessToken
       );
     } catch (e) {
