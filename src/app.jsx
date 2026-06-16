@@ -106,10 +106,22 @@ async function requestAccessToken() {
   if (!clientId) throw new Error("NO_CLIENT_ID");
   await loadGIS();
   return new Promise((resolve, reject) => {
+    let settled = false;
+    // GIS sometimes never invokes the callback if the consent popup was
+    // silently blocked by the browser — without a timeout the caller hangs
+    // forever with no visible error, which looks like "upload does nothing".
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("popup_timeout: ไม่ได้รับการตอบกลับจาก Google · popup อาจถูกบล็อก กรุณาอนุญาต popup แล้วลองใหม่"));
+    }, 60000);
     const client = google.accounts.oauth2.initTokenClient({
       client_id: clientId,
       scope: GOOGLE_DRIVE_SCOPE,
       callback: (resp) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         if (resp.error) { reject(new Error(resp.error)); return; }
         const token = {
           accessToken: resp.access_token,
@@ -390,7 +402,12 @@ async function driveEnsurePatientFolder(note, rootFolderId, accessToken) {
 }
 
 async function uploadSpecimenImages(note, folderId, accessToken) {
-  const patientFolder = await driveEnsurePatientFolder(note, folderId, accessToken);
+  let patientFolder;
+  try {
+    patientFolder = await driveEnsurePatientFolder(note, folderId, accessToken);
+  } catch (e) {
+    throw new Error("Patient folder error: " + (e.message || e));
+  }
   const patch = {
     patientFolderId: patientFolder.id || null,
     patientFolderLink: patientFolder.webViewLink || (patientFolder.id ? `https://drive.google.com/drive/folders/${patientFolder.id}` : ""),
@@ -410,14 +427,19 @@ async function uploadSpecimenImages(note, folderId, accessToken) {
       safeFilePart(note.name),
       `specimen_${idx}.${ext}`,
     ].join("_");
-    const result = await driveUploadBlob(
-      blob,
-      blob.type || "image/jpeg",
-      fileName,
-      patientFolder.id,
-      note[`${key}_fileId`] || null,
-      accessToken
-    );
+    let result;
+    try {
+      result = await driveUploadBlob(
+        blob,
+        blob.type || "image/jpeg",
+        fileName,
+        patientFolder.id,
+        note[`${key}_fileId`] || null,
+        accessToken
+      );
+    } catch (e) {
+      throw new Error(`Specimen image ${idx} upload error: ` + (e.message || e));
+    }
     patch[`${key}_fileId`] = result.id || null;
     patch[`${key}_link`] = result.webViewLink || "";
   }
@@ -556,10 +578,13 @@ async function driveFindExcelFile(folderId, accessToken) {
 
 // Main function: upsert note row in the shared Excel file on Drive
 async function driveUpsertExcel(note, folderId) {
-  await loadXlsx();
+  // Acquire the token before loading SheetJS: the OAuth popup must stay
+  // tied to the user's click, and awaiting a CDN fetch first can push it
+  // far enough away that browsers block the popup silently.
   let token = getStoredToken();
   if (!token) token = await requestAccessToken();
   const at = token.accessToken;
+  await loadXlsx();
 
   const noteForExcel = await uploadSpecimenImages(note, folderId, at);
   const headers = EXCEL_COLUMNS.map(c => c.header);
@@ -788,10 +813,10 @@ function rowToNote(row, headers) {
 
 // Load all notes from Drive Excel file
 async function driveLoadNotes(folderId) {
-  await loadXlsx();
   let token = getStoredToken();
   if (!token) token = await requestAccessToken();
   const at = token.accessToken;
+  await loadXlsx();
 
   // Find file
   let fileId = getExcelFileId();
@@ -826,6 +851,12 @@ function App() {
   const [driveSetup, setDriveSetup] = React.useState(false);
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const toast = useToast();
+
+  // Preload the Google sign-in script up front so requesting an access token
+  // later (on a Drive upload click) doesn't need to fetch it first — that
+  // fetch delay can detach the OAuth popup from the user's click and get it
+  // silently blocked by the browser.
+  React.useEffect(() => { loadGIS().catch(() => {}); }, []);
 
   const refresh = () => setNotes(loadAllNotes());
 
