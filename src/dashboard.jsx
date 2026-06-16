@@ -1,6 +1,6 @@
 // Dashboard view — combined with full list (All notes section removed)
 
-function Dashboard({ notes, localNotes, onNew, onOpen, onDuplicate, onExportPdf, onUploadDrive, onSyncDrive, onUploadAllDrive, driveLoading, uploadingAll, uploadAllProgress, hasDriveNotes }) {
+function Dashboard({ notes, localNotes, onNew, onOpen, onDuplicate, onExportPdf, onUploadDrive, onSyncDrive, onUploadAllDrive, driveLoading, uploadingAll, uploadAllProgress, uploadingNoteId, hasDriveNotes }) {
   const [q, setQ] = React.useState("");
   const [filter, setFilter] = React.useState("all");
   const [lockedMsg, setLockedMsg] = React.useState(null);
@@ -279,7 +279,19 @@ function Dashboard({ notes, localNotes, onNew, onOpen, onDuplicate, onExportPdf,
                           >{canPdf ? "PDF" : "🔒"}</button>
                         );
                       })()}
-                      <button className="btn btn-sm btn-ghost" onClick={() => onUploadDrive(n)} title="Upload to Drive">☁</button>
+                      {(() => {
+                        const isUploading = uploadingNoteId === n.id;
+                        const busy = isUploading || uploadingAll;
+                        return (
+                          <button
+                            className="btn btn-sm btn-ghost"
+                            onClick={() => { if (!busy) onUploadDrive(n); }}
+                            disabled={busy}
+                            style={busy ? { opacity: 0.6, cursor: "not-allowed" } : undefined}
+                            title={isUploading ? "กำลังอัปโหลด…" : "Upload to Drive"}
+                          >{isUploading ? "⏳" : "☁"}</button>
+                        );
+                      })()}
                       <button className="btn btn-sm btn-ghost" onClick={() => onDuplicate(n.id)} title="Duplicate" disabled={locked} style={locked ? { opacity: 0.4, cursor: "not-allowed" } : undefined}>⎘</button>
                     </div>
                   </td>

@@ -350,6 +350,24 @@ async function driveFindFolderByName(parentFolderId, folderName, accessToken) {
   return (data.files || [])[0] || null;
 }
 
+async function driveFindFileByName(parentFolderId, fileName, accessToken) {
+  const escapedName = String(fileName || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const q = encodeURIComponent(
+    `name='${escapedName}' and '${parentFolderId}' in parents and trashed=false`
+  );
+  const resp = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,webViewLink)&pageSize=1&orderBy=createdTime&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+    { headers: { Authorization: "Bearer " + accessToken } }
+  );
+  if (!resp.ok) {
+    const err = await resp.text();
+    if (resp.status === 401) { clearStoredToken(); throw new Error("AUTH_EXPIRED: " + err); }
+    throw new Error("Find file failed: " + err);
+  }
+  const data = await resp.json();
+  return (data.files || [])[0] || null;
+}
+
 async function driveCreateFolder(parentFolderId, folderName, accessToken) {
   const resp = await fetch(
     "https://www.googleapis.com/drive/v3/files?fields=id,name,webViewLink&supportsAllDrives=true",
@@ -458,9 +476,19 @@ async function driveUploadBlob(blob, mimeType, fileName, folderId, existingFileI
     return { ok: true, data: await resp.json() };
   };
 
-  let result = await uploadOnce(existingFileId || null);
-  if (!result.ok && existingFileId && (result.status === 403 || result.status === 404)) {
-    result = await uploadOnce(null);
+  // Never blindly create a new file if one with the same name already exists in
+  // the folder (stale/missing fileId, retried uploads, etc.) — look it up first
+  // so we update it instead of leaving a duplicate behind.
+  let fileId = existingFileId || null;
+  if (!fileId && folderId) {
+    const existing = await driveFindFileByName(folderId, fileName, accessToken);
+    if (existing) fileId = existing.id;
+  }
+
+  let result = await uploadOnce(fileId);
+  if (!result.ok && fileId && (result.status === 403 || result.status === 404)) {
+    const existing = folderId ? await driveFindFileByName(folderId, fileName, accessToken) : null;
+    result = await uploadOnce(existing ? existing.id : null);
   }
   if (!result.ok) {
     if (result.status === 401) { clearStoredToken(); throw new Error("AUTH_EXPIRED: " + result.error); }
@@ -821,6 +849,8 @@ function App() {
   const [driveLoading, setDriveLoading] = React.useState(false);
   const [uploadingAll, setUploadingAll] = React.useState(false); // bulk upload progress
   const [uploadAllProgress, setUploadAllProgress] = React.useState(null); // {done, total}
+  const [uploadingNoteId, setUploadingNoteId] = React.useState(null); // note currently uploading (blocks duplicate clicks)
+  const uploadingNoteRef = React.useRef(null); // synchronous guard, ahead of React state updates
   const [view, setView] = React.useState("dashboard"); // dashboard | form
   const [editing, setEditing] = React.useState(null);
   const [driveSetup, setDriveSetup] = React.useState(false);
@@ -922,12 +952,17 @@ function App() {
   };
 
   const handleUploadDrive = async (note) => {
+    // Guard against double-clicks / re-entrant calls for the same note, which
+    // would otherwise fire two concurrent uploads and leave duplicate files on Drive.
+    if (uploadingNoteRef.current === note.id) return;
     const cid = getClientId();
     if (!cid) {
       toast.push("กรุณาตั้งค่า Google Client ID ก่อน", "err");
       setDriveSetup(true);
       return;
     }
+    uploadingNoteRef.current = note.id;
+    setUploadingNoteId(note.id);
     try {
       toast.push("กำลังเตรียมข้อมูล Excel…");
       const uploadedAt = new Date().toISOString();
@@ -964,6 +999,9 @@ function App() {
       } else {
         toast.push("อัปโหลดไม่สำเร็จ: " + msg.slice(0, 100), "err");
       }
+    } finally {
+      uploadingNoteRef.current = null;
+      setUploadingNoteId(null);
     }
   };
 
@@ -986,6 +1024,13 @@ function App() {
 
     for (let i = 0; i < pending.length; i++) {
       const note = pending[i];
+      if (uploadingNoteRef.current === note.id) {
+        // already being uploaded individually elsewhere — skip to avoid duplicates
+        setUploadAllProgress({ done: i + 1, total: pending.length });
+        continue;
+      }
+      uploadingNoteRef.current = note.id;
+      setUploadingNoteId(note.id);
       try {
         const uploadedAt = new Date().toISOString();
         const noteForDrive = prepareUploadNote(note, uploadedAt);
@@ -1002,6 +1047,9 @@ function App() {
       } catch (e) {
         console.warn("Upload all — failed for note:", note.id, e);
         fail++;
+      } finally {
+        uploadingNoteRef.current = null;
+        setUploadingNoteId(null);
       }
       setUploadAllProgress({ done: i + 1, total: pending.length });
     }
@@ -1100,6 +1148,7 @@ function App() {
               driveLoading={driveLoading}
               uploadingAll={uploadingAll}
               uploadAllProgress={uploadAllProgress}
+              uploadingNoteId={uploadingNoteId}
               hasDriveNotes={driveNotes.length > 0}
             />
           )}
@@ -1111,6 +1160,7 @@ function App() {
               onCancel={() => { setView("dashboard"); setEditing(null); }}
               onExportPdf={handleExportPdf}
               onUploadDrive={handleUploadDrive}
+              uploadingNoteId={uploadingNoteId}
               logoSrc={LOGO_SRC}
               toast={toast}
             />

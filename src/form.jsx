@@ -14,7 +14,7 @@ function calcOpTime(start, end) {
   return String(mins);
 }
 
-function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUploadDrive, logoSrc, toast }) {
+function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUploadDrive, uploadingNoteId, logoSrc, toast }) {
   const [n, setN] = React.useState(note);
   // isSaved = true หลังจากกด "บันทึก" ครั้งแรก (หรือ note ที่โหลดจาก storage ซึ่งมี createdAt แล้ว)
   const [isSaved, setIsSaved] = React.useState(!!(note.createdAt));
@@ -67,7 +67,8 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
   const lockBaseRaw = n.createdAt || n.date;
   const lockBaseTime = lockBaseRaw ? new Date(lockBaseRaw).getTime() : null;
   const isLocked = !!(Number.isFinite(lockBaseTime) && (Date.now() - lockBaseTime) > LOCK_MS);
-  const canUpload = isSaved && !hasUnsaved;
+  const isUploading = uploadingNoteId === n.id;
+  const canUpload = isSaved && !hasUnsaved && !isUploading;
   const canExport = !isLocked && !!(n.driveUploadedAt);
 
   // Step indicator
@@ -128,10 +129,11 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
           <button
             className={"btn" + (canUpload ? " btn-primary" : " btn-locked")}
             style={canUpload ? { background: "var(--rose)", color: "#fff", borderColor: "var(--rose)" } : {}}
-            title={!isSaved ? "กรุณา บันทึก ก่อน" : hasUnsaved ? "มีการแก้ไข กรุณา บันทึก ก่อน" : "Upload to Drive"}
+            disabled={isUploading}
+            title={isUploading ? "กำลังอัปโหลด…" : !isSaved ? "กรุณา บันทึก ก่อน" : hasUnsaved ? "มีการแก้ไข กรุณา บันทึก ก่อน" : "Upload to Drive"}
             onClick={() => { if (canUpload) onUploadDrive(n); }}
           >
-            <span>☁</span> Upload to Drive {n.driveUploadedAt && "✓"}
+            <span>☁</span> {isUploading ? "กำลังอัปโหลด…" : "Upload to Drive"} {n.driveUploadedAt && !isUploading && "✓"}
           </button>
 
           {/* Step 3: Export PDF */}
