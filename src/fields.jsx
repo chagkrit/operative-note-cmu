@@ -83,8 +83,8 @@ function Chips({ value, onChange, options }) {
   );
 }
 
-const SPECIMEN_IMAGE_MAX_BYTES = 450 * 1024;
-const SPECIMEN_IMAGE_MIN_PX = 650;
+const SPECIMEN_IMAGE_MAX_BYTES = 120 * 1024; // 120 KB — stays well within 5 MB localStorage
+const SPECIMEN_IMAGE_MIN_PX = 500;
 
 function dataUrlBytes(dataUrl) {
   const comma = String(dataUrl || "").indexOf(",");

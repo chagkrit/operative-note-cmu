@@ -15,8 +15,40 @@ function loadAllNotes() {
   }
 }
 
+function isQuotaError(e) {
+  return !!(e && (String(e.name).includes("Quota") || e.code === 22));
+}
+
+// Strip image binary data from a note, keeping Drive links intact
+function stripNoteImages(n) {
+  return {
+    ...n,
+    specimen_image_1: n.specimen_image_1 ? { name: n.specimen_image_1.name } : null,
+    specimen_image_2: n.specimen_image_2 ? { name: n.specimen_image_2.name } : null,
+  };
+}
+
 function saveAllNotes(notes) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
+  // Try full save first
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
+    return;
+  } catch (e) {
+    if (!isQuotaError(e)) throw e;
+  }
+  // Fallback: strip image dataUrls from notes already backed up to Drive
+  // (they're safe on Drive — we just drop the cached binary to free space)
+  const compacted = notes.map(n => n.driveUploadedAt ? stripNoteImages(n) : n);
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(compacted));
+    return;
+  } catch (e) {
+    if (!isQuotaError(e)) throw e;
+  }
+  // If still no room, throw a clear storage error
+  const err = new Error("QuotaExceededError: พื้นที่จัดเก็บในเครื่องเต็ม กรุณา Upload to Drive แล้วลองอีกครั้ง");
+  err.name = "QuotaExceededError";
+  throw err;
 }
 
 function upsertNote(note) {
@@ -40,6 +72,7 @@ function deleteNote(id) {
   const all = loadAllNotes().filter(n => n.id !== id);
   saveAllNotes(all);
 }
+
 
 function duplicateNote(id) {
   const all = loadAllNotes();

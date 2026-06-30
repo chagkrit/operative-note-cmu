@@ -925,10 +925,10 @@ function App() {
       return saved;
     } catch (e) {
       console.error("Save error:", e);
-      if (String(e.message).includes("QuotaExceededError") || String(e.message).includes("storage") || String(e.name).includes("Quota")) {
-        toast.push("บันทึกไม่สำเร็จ: พื้นที่เก็บข้อมูลในเครื่องเต็ม (อาจมีรูปภาพขนาดใหญ่มากเกินไป)", "err");
+      if (e.name === "QuotaExceededError" || String(e.name).includes("Quota") || e.code === 22) {
+        toast.push("⚠️ บันทึกไม่สำเร็จ: พื้นที่เก็บข้อมูลในเครื่องเต็ม — กรุณา Upload to Drive บันทึกเก่าก่อน แล้วลองใหม่", "err");
       } else {
-        toast.push("บันทึกไม่สำเร็จ: " + e.message, "err");
+        toast.push("บันทึกไม่สำเร็จ: " + (e.message || e), "err");
       }
       return null;
     }

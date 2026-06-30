@@ -64,10 +64,10 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
     }
   };
 
-  // Lock states
+  // Lock states — based on when the note was FIRST SAVED (createdAt), not the operation date.
+  // New notes (createdAt = null) are never locked, regardless of the operation date filled in.
   const LOCK_MS = 24 * 60 * 60 * 1000;
-  const lockBaseRaw = n.createdAt || n.date;
-  const lockBaseTime = lockBaseRaw ? new Date(lockBaseRaw).getTime() : null;
+  const lockBaseTime = n.createdAt ? new Date(n.createdAt).getTime() : null;
   const isLocked = !!(Number.isFinite(lockBaseTime) && (Date.now() - lockBaseTime) > LOCK_MS);
   const canUpload = isSaved && !hasUnsaved;
   const canExport = !isLocked && !!(n.driveUploadedAt);
