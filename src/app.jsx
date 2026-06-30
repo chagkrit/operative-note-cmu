@@ -180,8 +180,7 @@ const EXCEL_COLUMNS = [
   { key: "opfinding",      header: "Op Finding" },
   { key: "opprocedure",    header: "Op Procedure" },
   { key: "specimen",       header: "Specimen" },
-  { key: "specimen_image_1_link", header: "Specimen Image 1" },
-  { key: "specimen_image_2_link", header: "Specimen Image 2" },
+  { key: "specimen_image_1_link", header: "Specimen Image" },
   { key: "ebl",            header: "EBL (ml)" },
   { key: "fluid",          header: "IV Fluid (ml)" },
   { key: "bloodtx",        header: "Blood Tx (unit)" },
@@ -659,8 +658,6 @@ async function driveUpsertExcel(note, folderId) {
     "patientFolderLink",
     "specimen_image_1_fileId",
     "specimen_image_1_link",
-    "specimen_image_2_fileId",
-    "specimen_image_2_link",
   ].forEach(key => {
     if (noteForExcel[key] !== note[key]) notePatch[key] = noteForExcel[key];
   });

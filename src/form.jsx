@@ -40,10 +40,8 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
       patientFolderLink: note.patientFolderLink,
       specimen_image_1_fileId: note.specimen_image_1_fileId,
       specimen_image_1_link: note.specimen_image_1_link,
-      specimen_image_2_fileId: note.specimen_image_2_fileId,
-      specimen_image_2_link: note.specimen_image_2_link,
     }) : prev);
-  }, [note.id, note.createdAt, note.updatedAt, note.driveUploadedAt, note.driveFileId, note.driveFileLink, note.patientFolderId, note.patientFolderLink, note.specimen_image_1_fileId, note.specimen_image_1_link, note.specimen_image_2_fileId, note.specimen_image_2_link]);
+  }, [note.id, note.createdAt, note.updatedAt, note.driveUploadedAt, note.driveFileId, note.driveFileLink, note.patientFolderId, note.patientFolderLink, note.specimen_image_1_fileId, note.specimen_image_1_link]);
 
   const update = (patch) => {
     const next = { ...n, ...patch };
@@ -293,23 +291,14 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
             <Field label="Specimen">
               <TextArea value={n.specimen} onChange={v => update({ specimen: v })} placeholder="รายการ specimen ที่ส่งตรวจ..." rows={4} />
             </Field>
-            <div className="spec-uploads">
+            <div>
               <ImageUpload
                 value={n.specimen_image_1}
-                label="เพิ่มรูป specimen 1"
+                label="เพิ่มรูป specimen"
                 onChange={v => update({
                   specimen_image_1: v,
                   specimen_image_1_fileId: null,
                   specimen_image_1_link: null,
-                })}
-              />
-              <ImageUpload
-                value={n.specimen_image_2}
-                label="เพิ่มรูป specimen 2"
-                onChange={v => update({
-                  specimen_image_2: v,
-                  specimen_image_2_fileId: null,
-                  specimen_image_2_link: null,
                 })}
               />
             </div>

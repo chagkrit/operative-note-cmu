@@ -75,10 +75,9 @@ function PdfSheet({ note, logoSrc }) {
 
       <div className="pdf-section-title">Specimen</div>
       <div className="pdf-block">{v(note.specimen)}</div>
-      {(note.specimen_image_1?.dataUrl || note.specimen_image_2?.dataUrl) && (
+      {note.specimen_image_1?.dataUrl && (
         <div style={{ marginTop: 4 }}>
-          {note.specimen_image_1?.dataUrl && <img className="pdf-spec-img" src={note.specimen_image_1.dataUrl} alt="Specimen 1" />}
-          {note.specimen_image_2?.dataUrl && <img className="pdf-spec-img" src={note.specimen_image_2.dataUrl} alt="Specimen 2" />}
+          <img className="pdf-spec-img" src={note.specimen_image_1.dataUrl} alt="Specimen" />
         </div>
       )}
 
