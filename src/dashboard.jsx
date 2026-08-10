@@ -1,13 +1,13 @@
 // Dashboard view — combined with full list (All notes section removed)
 
-function Dashboard({ notes, localNotes, onNew, onOpen, onDuplicate, onExportPdf, onUploadDrive, onSyncDrive, onUploadAllDrive, driveLoading, uploadingAll, uploadAllProgress, hasDriveNotes }) {
+function Dashboard({ notes, localNotes, onNew, onOpen, onDuplicate, onExportPdf, onUploadDrive, onSyncDrive, onUploadAllDrive, driveLoading, uploadingAll, uploadingNoteIds, uploadAllProgress, hasDriveNotes }) {
   const [q, setQ] = React.useState("");
   const [filter, setFilter] = React.useState("all");
   const [lockedMsg, setLockedMsg] = React.useState(null);
 
-  // Lock helpers: note becomes read-only 24h after createdAt.
+  // Lock helpers: note becomes read-only 12h after createdAt.
   // Older Drive rows may not have Created At, so fall back to operative date.
-  const LOCK_MS = 24 * 60 * 60 * 1000;
+  const LOCK_MS = 12 * 60 * 60 * 1000;
   const lockBaseTime = (n) => {
     const raw = n.createdAt || n.date;
     if (!raw) return null;
@@ -35,7 +35,7 @@ function Dashboard({ notes, localNotes, onNew, onOpen, onDuplicate, onExportPdf,
   };
   const tryOpen = (n) => {
     if (isLocked(n)) {
-      setLockedMsg(`บันทึกนี้ถูกล็อกแล้ว (ครบ 24 ชั่วโมงหลังบันทึก) · ไม่สามารถเปิดดูหรือแก้ไขได้`);
+      setLockedMsg(`บันทึกนี้ถูกล็อกแล้ว (ครบ 12 ชั่วโมงหลังบันทึก) · ไม่สามารถเปิดดูหรือแก้ไขได้`);
       return;
     }
     onOpen(n.id);
@@ -244,7 +244,7 @@ function Dashboard({ notes, localNotes, onNew, onOpen, onDuplicate, onExportPdf,
                   <td className="col-hide-mobile">{n.side && <span className="pill pill-pink">{n.side}</span>}</td>
                   <td>
                     {locked
-                      ? <span className="pill pill-gray" title="Locked after 24h">🔒 Locked</span>
+                      ? <span className="pill pill-gray" title="Locked after 12h">🔒 Locked</span>
                       : (n.complete
                         ? <span className="pill pill-pink">Complete</span>
                         : <span className="pill pill-gray">Draft</span>)}
@@ -261,14 +261,14 @@ function Dashboard({ notes, localNotes, onNew, onOpen, onDuplicate, onExportPdf,
                         className={"btn btn-sm" + (locked ? " btn-locked" : "")}
                         onClick={() => tryOpen(n)}
                         disabled={locked}
-                        title={locked ? "ครบ 24h แล้ว — ไม่สามารถเปิดแก้ไขได้" : "เปิดบันทึก"}
+                        title={locked ? "ครบ 12h แล้ว — ไม่สามารถเปิดแก้ไขได้" : "เปิดบันทึก"}
                         style={locked ? { opacity: 0.4, cursor: "not-allowed" } : undefined}
                       >
                         {locked ? "🔒" : "Open"}
                       </button>
                       {(() => {
                         const canPdf = !locked && !!n.driveUploadedAt;
-                        const pdfTitle = locked ? "ครบ 24h แล้ว — ไม่สามารถ Export PDF ได้" : (!n.driveUploadedAt ? "Upload to Drive ก่อน" : "Export PDF");
+                        const pdfTitle = locked ? "ครบ 12h แล้ว — ไม่สามารถ Export PDF ได้" : (!n.driveUploadedAt ? "Upload to Drive ก่อน" : "Export PDF");
                         return (
                           <button
                             className={"btn btn-sm btn-ghost" + (canPdf ? "" : " btn-locked")}
@@ -279,7 +279,12 @@ function Dashboard({ notes, localNotes, onNew, onOpen, onDuplicate, onExportPdf,
                           >{canPdf ? "PDF" : "🔒"}</button>
                         );
                       })()}
-                      <button className="btn btn-sm btn-ghost" onClick={() => onUploadDrive(n)} title="Upload to Drive">☁</button>
+                      <button
+                        className="btn btn-sm btn-ghost"
+                        onClick={() => onUploadDrive(n)}
+                        title={uploadingNoteIds?.has(n.id) ? "กำลัง Upload…" : "Upload to Drive"}
+                        disabled={uploadingAll || uploadingNoteIds?.has(n.id)}
+                      >{uploadingNoteIds?.has(n.id) ? "…" : "☁"}</button>
                       <button className="btn btn-sm btn-ghost" onClick={() => onDuplicate(n.id)} title="Duplicate" disabled={locked} style={locked ? { opacity: 0.4, cursor: "not-allowed" } : undefined}>⎘</button>
                     </div>
                   </td>

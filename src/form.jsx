@@ -14,8 +14,9 @@ function calcOpTime(start, end) {
   return String(mins);
 }
 
-function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUploadDrive, logoSrc, toast }) {
+function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUploadDrive, uploadingDrive, logoSrc, toast }) {
   const [n, setN] = React.useState(note);
+  const [showImageRequired, setShowImageRequired] = React.useState(false);
   // isSaved = true หลังจากกด "บันทึก" ครั้งแรก (หรือ note ที่โหลดจาก storage ซึ่งมี createdAt แล้ว)
   const [isSaved, setIsSaved] = React.useState(!!(note.createdAt));
   // hasUnsaved = มีการแก้ไขหลังจาก save ล่าสุด
@@ -54,6 +55,11 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
   };
 
   const save = () => {
+    const hasSpecimenImage = !!(n.specimen_image_1?.dataUrl || n.specimen_image_1_link);
+    if (!hasSpecimenImage) {
+      setShowImageRequired(true);
+      return;
+    }
     const saved = onSave(n);
     if (saved) {
       setN(saved);
@@ -64,10 +70,10 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
 
   // Lock states — based on when the note was FIRST SAVED (createdAt), not the operation date.
   // New notes (createdAt = null) are never locked, regardless of the operation date filled in.
-  const LOCK_MS = 24 * 60 * 60 * 1000;
+  const LOCK_MS = 12 * 60 * 60 * 1000;
   const lockBaseTime = n.createdAt ? new Date(n.createdAt).getTime() : null;
   const isLocked = !!(Number.isFinite(lockBaseTime) && (Date.now() - lockBaseTime) > LOCK_MS);
-  const canUpload = isSaved && !hasUnsaved;
+  const canUpload = isSaved && !hasUnsaved && !uploadingDrive;
   const canExport = !isLocked && !!(n.driveUploadedAt);
 
   // Step indicator
@@ -129,15 +135,16 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
             className={"btn" + (canUpload ? " btn-primary" : " btn-locked")}
             style={canUpload ? { background: "var(--rose)", color: "#fff", borderColor: "var(--rose)" } : {}}
             title={!isSaved ? "กรุณา บันทึก ก่อน" : hasUnsaved ? "มีการแก้ไข กรุณา บันทึก ก่อน" : "Upload to Drive"}
+            disabled={!!uploadingDrive}
             onClick={() => { if (canUpload) onUploadDrive(n); }}
           >
-            <span>☁</span> Upload to Drive {n.driveUploadedAt && "✓"}
+            <span>☁</span> {uploadingDrive ? "กำลัง Upload…" : "Upload to Drive"} {!uploadingDrive && n.driveUploadedAt && "✓"}
           </button>
 
           {/* Step 3: Export PDF */}
           <button
             className={"btn" + (canExport ? "" : " btn-locked")}
-            title={isLocked ? "ครบ 24h แล้ว — ไม่สามารถ Export PDF ได้" : (!n.driveUploadedAt ? "กรุณา Upload to Drive ก่อน" : "Export PDF")}
+            title={isLocked ? "ครบ 12h แล้ว — ไม่สามารถ Export PDF ได้" : (!n.driveUploadedAt ? "กรุณา Upload to Drive ก่อน" : "Export PDF")}
             onClick={() => { if (canExport) onExportPdf(n); }}
           >
             <span>{canExport ? "📄" : "🔒"}</span> Export PDF
@@ -351,16 +358,33 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
 
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", paddingBottom: 60 }}>
         <button className="btn" onClick={onCancel}>ยกเลิก</button>
-        <button className={"btn" + (canExport ? "" : " btn-locked")} title={isLocked ? "ครบ 24h แล้ว — ไม่สามารถ Export PDF ได้" : (!n.driveUploadedAt ? "กรุณา Upload to Drive ก่อน" : "Export PDF")} onClick={() => { if (canExport) onExportPdf(n); }}>Export PDF</button>
+        <button className={"btn" + (canExport ? "" : " btn-locked")} title={isLocked ? "ครบ 12h แล้ว — ไม่สามารถ Export PDF ได้" : (!n.driveUploadedAt ? "กรุณา Upload to Drive ก่อน" : "Export PDF")} onClick={() => { if (canExport) onExportPdf(n); }}>Export PDF</button>
         <button
           className={"btn" + (canUpload ? "" : " btn-locked")}
           title={!isSaved ? "กรุณา บันทึก ก่อน" : hasUnsaved ? "มีการแก้ไข กรุณา บันทึก ก่อน" : "Upload to Drive"}
+          disabled={!!uploadingDrive}
           onClick={() => { if (canUpload) onUploadDrive(n); }}
         >
-          Upload to Drive
+          {uploadingDrive ? "กำลัง Upload…" : "Upload to Drive"}
         </button>
         <button className="btn btn-primary" onClick={save}>บันทึกข้อมูล</button>
       </div>
+
+      {showImageRequired && (
+        <div className="modal-backdrop" onClick={() => setShowImageRequired(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} role="alertdialog" aria-modal="true" aria-labelledby="image-required-title">
+            <div className="modal-head">
+              <h3 id="image-required-title">กรุณา Upload รูป specimen</h3>
+            </div>
+            <div className="modal-body">
+              <p style={{ margin: 0 }}>ต้องแนบรูป specimen อย่างน้อย 1 รูปก่อน จึงจะสามารถบันทึกข้อมูลได้</p>
+            </div>
+            <div className="modal-foot">
+              <button className="btn btn-primary" autoFocus onClick={() => setShowImageRequired(false)}>ตกลง</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
