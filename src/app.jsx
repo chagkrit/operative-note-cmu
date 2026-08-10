@@ -388,13 +388,40 @@ async function driveEnsurePatientFolder(note, rootFolderId, accessToken) {
   return await driveCreateFolder(rootFolderId, folderName, accessToken);
 }
 
+async function driveResolveImageFile(folderId, fileName, preferredFileId, accessToken) {
+  const preferredMeta = preferredFileId ? await driveGetFileMetadata(preferredFileId, accessToken) : null;
+  const preferredIsValid = !!(
+    preferredMeta &&
+    !preferredMeta.trashed &&
+    Array.isArray(preferredMeta.parents) &&
+    preferredMeta.parents.includes(folderId)
+  );
+  const escapedName = String(fileName || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const q = encodeURIComponent(`name='${escapedName}' and '${folderId}' in parents and trashed=false`);
+  const resp = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+    { headers: { Authorization: "Bearer " + accessToken } }
+  );
+  if (!resp.ok) {
+    const err = await resp.text();
+    if (resp.status === 401) { clearStoredToken(); throw new Error("AUTH_EXPIRED: " + err); }
+    throw new Error("Find image failed: " + err);
+  }
+  const files = (await resp.json()).files || [];
+  const selected = preferredIsValid ? preferredMeta : (files[0] || null);
+  if (selected && files.some(f => f.id !== selected.id)) {
+    await Promise.all(files.filter(f => f.id !== selected.id).map(f => driveTrashFile(f.id, accessToken)));
+  }
+  return selected;
+}
+
 async function uploadSpecimenImages(note, folderId, accessToken) {
   const patientFolder = await driveEnsurePatientFolder(note, folderId, accessToken);
   const patch = {
     patientFolderId: patientFolder.id || null,
     patientFolderLink: patientFolder.webViewLink || (patientFolder.id ? `https://drive.google.com/drive/folders/${patientFolder.id}` : ""),
   };
-  for (const idx of [1, 2]) {
+  for (const idx of [1]) {
     const key = `specimen_image_${idx}`;
     const image = note[key];
     if (!image || !image.dataUrl) continue;
@@ -409,12 +436,18 @@ async function uploadSpecimenImages(note, folderId, accessToken) {
       safeFilePart(note.name),
       `specimen_${idx}.${ext}`,
     ].join("_");
+    const existingImage = await driveResolveImageFile(
+      patientFolder.id,
+      fileName,
+      note[`${key}_fileId`] || null,
+      accessToken
+    );
     const result = await driveUploadBlob(
       blob,
       blob.type || "image/jpeg",
       fileName,
       patientFolder.id,
-      note[`${key}_fileId`] || null,
+      existingImage?.id || null,
       accessToken
     );
     patch[`${key}_fileId`] = result.id || null;
@@ -515,7 +548,7 @@ async function driveTrashFile(fileId, accessToken) {
     headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json" },
     body: JSON.stringify({ trashed: true }),
   });
-  if (!resp.ok) console.warn("Unable to trash duplicate Excel file:", await resp.text());
+  if (!resp.ok) console.warn("Unable to trash duplicate Drive file:", await resp.text());
 }
 
 async function driveResolveExcelFile(folderId, accessToken) {
@@ -817,6 +850,8 @@ function App() {
   const [driveNotes, setDriveNotes] = React.useState([]); // notes loaded from Drive Excel
   const [driveLoading, setDriveLoading] = React.useState(false);
   const [uploadingAll, setUploadingAll] = React.useState(false); // bulk upload progress
+  const [uploadingNoteIds, setUploadingNoteIds] = React.useState(() => new Set());
+  const uploadsInFlightRef = React.useRef(new Set());
   const [uploadAllProgress, setUploadAllProgress] = React.useState(null); // {done, total}
   const [view, setView] = React.useState("dashboard"); // dashboard | form
   const [editing, setEditing] = React.useState(null);
@@ -894,7 +929,7 @@ function App() {
   };
 
   const openNew = () => { setEditing(emptyNote()); setView("form"); };
-  const LOCK_MS = 24 * 60 * 60 * 1000;
+  const LOCK_MS = 12 * 60 * 60 * 1000;
   const noteLockBaseTime = (n) => {
     if (!n) return null;
     const raw = n.createdAt || n.date;
@@ -939,7 +974,7 @@ function App() {
   const handleExportPdf = (note) => {
     const locked = isNoteLocked(note);
     if (locked) {
-      toast.push("บันทึกนี้ครบ 24 ชั่วโมงแล้ว ไม่สามารถ Export PDF ได้", "err");
+      toast.push("บันทึกนี้ครบ 12 ชั่วโมงแล้ว ไม่สามารถ Export PDF ได้", "err");
       return;
     }
     if (!note.driveUploadedAt) {
@@ -950,12 +985,15 @@ function App() {
   };
 
   const handleUploadDrive = async (note) => {
+    if (uploadsInFlightRef.current.has(note.id)) return;
     const cid = getClientId();
     if (!cid) {
       toast.push("กรุณาตั้งค่า Google Client ID ก่อน", "err");
       setDriveSetup(true);
       return;
     }
+    uploadsInFlightRef.current.add(note.id);
+    setUploadingNoteIds(prev => new Set(prev).add(note.id));
     try {
       toast.push("กำลังเตรียมข้อมูล Excel…");
       const uploadedAt = new Date().toISOString();
@@ -992,6 +1030,13 @@ function App() {
       } else {
         toast.push("อัปโหลดไม่สำเร็จ: " + msg.slice(0, 100), "err");
       }
+    } finally {
+      uploadsInFlightRef.current.delete(note.id);
+      setUploadingNoteIds(prev => {
+        const next = new Set(prev);
+        next.delete(note.id);
+        return next;
+      });
     }
   };
 
@@ -1001,7 +1046,7 @@ function App() {
     if (!cid) { toast.push("กรุณาตั้งค่า Google Client ID ก่อน", "err"); setDriveSetup(true); return; }
 
     // Only upload local notes that have no driveUploadedAt
-    const pending = notes.filter(n => !n.driveUploadedAt);
+    const pending = notes.filter(n => !n.driveUploadedAt && !uploadsInFlightRef.current.has(n.id));
     if (pending.length === 0) {
       toast.push("ทุกบันทึกในเครื่องนี้อัปโหลด Drive แล้ว ✓", "ok");
       return;
@@ -1009,6 +1054,7 @@ function App() {
 
     setUploadingAll(true);
     setUploadAllProgress({ done: 0, total: pending.length });
+    pending.forEach(n => uploadsInFlightRef.current.add(n.id));
     let success = 0;
     let fail = 0;
 
@@ -1030,6 +1076,8 @@ function App() {
       } catch (e) {
         console.warn("Upload all — failed for note:", note.id, e);
         fail++;
+      } finally {
+        uploadsInFlightRef.current.delete(note.id);
       }
       setUploadAllProgress({ done: i + 1, total: pending.length });
     }
@@ -1127,6 +1175,7 @@ function App() {
               onUploadAllDrive={handleUploadAllDrive}
               driveLoading={driveLoading}
               uploadingAll={uploadingAll}
+              uploadingNoteIds={uploadingNoteIds}
               uploadAllProgress={uploadAllProgress}
               hasDriveNotes={driveNotes.length > 0}
             />
@@ -1139,6 +1188,7 @@ function App() {
               onCancel={() => { setView("dashboard"); setEditing(null); }}
               onExportPdf={handleExportPdf}
               onUploadDrive={handleUploadDrive}
+              uploadingDrive={uploadingNoteIds.has(editing.id)}
               logoSrc={LOGO_SRC}
               toast={toast}
             />
