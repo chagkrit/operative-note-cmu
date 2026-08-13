@@ -24,6 +24,7 @@ function stripNoteImages(n) {
   return {
     ...n,
     specimen_image_1: n.specimen_image_1 ? { name: n.specimen_image_1.name } : null,
+    specimen_image_2: n.specimen_image_2 ? { name: n.specimen_image_2.name } : null,
   };
 }
 
@@ -90,6 +91,8 @@ function duplicateNote(id) {
     patientFolderLink: null,
     specimen_image_1_fileId: null,
     specimen_image_1_link: null,
+    specimen_image_2_fileId: null,
+    specimen_image_2_link: null,
   };
   all.unshift(copy);
   saveAllNotes(all);
@@ -133,10 +136,13 @@ function emptyNote() {
     opprocedure: "",
     specimen: "",
     specimen_image_1: null, // {dataUrl, name}
+    specimen_image_2: null, // optional second image
     patientFolderId: null,
     patientFolderLink: null,
     specimen_image_1_fileId: null,
     specimen_image_1_link: null,
+    specimen_image_2_fileId: null,
+    specimen_image_2_link: null,
     ebl: "",
     fluid: "",
     bloodtx: "0",

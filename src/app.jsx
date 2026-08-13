@@ -101,7 +101,7 @@ function loadGIS() {
   });
 }
 
-async function requestAccessToken() {
+async function requestAccessToken(forceAccountSelection = false) {
   const clientId = getClientId();
   if (!clientId) throw new Error("NO_CLIENT_ID");
   await loadGIS();
@@ -119,7 +119,10 @@ async function requestAccessToken() {
         resolve(token);
       }
     });
-    client.requestAccessToken({ prompt: "" });
+    client.requestAccessToken({
+      prompt: forceAccountSelection ? "select_account" : "",
+      hint: AUTH_USER,
+    });
   });
 }
 
@@ -180,7 +183,8 @@ const EXCEL_COLUMNS = [
   { key: "opfinding",      header: "Op Finding" },
   { key: "opprocedure",    header: "Op Procedure" },
   { key: "specimen",       header: "Specimen" },
-  { key: "specimen_image_1_link", header: "Specimen Image" },
+  { key: "specimen_image_1_link", header: "Specimen Image 1" },
+  { key: "specimen_image_2_link", header: "Specimen Image 2" },
   { key: "ebl",            header: "EBL (ml)" },
   { key: "fluid",          header: "IV Fluid (ml)" },
   { key: "bloodtx",        header: "Blood Tx (unit)" },
@@ -245,6 +249,9 @@ const EXCEL_HEADER_ALIASES = {
   "Complete?": "Complete",
   "complete": "Complete",
   "specimen image": "Specimen Image 1",
+  "Specimen Image": "Specimen Image 1",
+  "Specimen Image 1": "Specimen Image 1",
+  "Specimen Image 2": "Specimen Image 2",
 };
 
 function canonicalHeader(header) {
@@ -368,6 +375,7 @@ async function driveCreateFolder(parentFolderId, folderName, accessToken) {
   if (!resp.ok) {
     const err = await resp.text();
     if (resp.status === 401) { clearStoredToken(); throw new Error("AUTH_EXPIRED: " + err); }
+    if (resp.status === 403) throw new Error("DRIVE_PERMISSION_DENIED: " + err);
     throw new Error("Create folder failed: " + err);
   }
   return await resp.json();
@@ -375,11 +383,19 @@ async function driveCreateFolder(parentFolderId, folderName, accessToken) {
 
 async function driveEnsurePatientFolder(note, rootFolderId, accessToken) {
   if (note.patientFolderId) {
-    return {
-      id: note.patientFolderId,
-      name: patientFolderName(note),
-      webViewLink: note.patientFolderLink || `https://drive.google.com/drive/folders/${note.patientFolderId}`,
-    };
+    const existingFolder = await driveGetFileMetadata(note.patientFolderId, accessToken);
+    if (
+      existingFolder &&
+      !existingFolder.trashed &&
+      existingFolder.mimeType === "application/vnd.google-apps.folder" &&
+      existingFolder.capabilities?.canAddChildren === true
+    ) {
+      return {
+        id: note.patientFolderId,
+        name: patientFolderName(note),
+        webViewLink: note.patientFolderLink || existingFolder.webViewLink || `https://drive.google.com/drive/folders/${note.patientFolderId}`,
+      };
+    }
   }
 
   const folderName = patientFolderName(note);
@@ -421,10 +437,21 @@ async function uploadSpecimenImages(note, folderId, accessToken) {
     patientFolderId: patientFolder.id || null,
     patientFolderLink: patientFolder.webViewLink || (patientFolder.id ? `https://drive.google.com/drive/folders/${patientFolder.id}` : ""),
   };
-  for (const idx of [1]) {
+  const uploadedImageSignatures = new Set();
+  for (const idx of [1, 2]) {
     const key = `specimen_image_${idx}`;
     const image = note[key];
     if (!image || !image.dataUrl) continue;
+
+    const signature = image.dataUrl;
+    if (uploadedImageSignatures.has(signature)) {
+      // The same local image must never be uploaded into both specimen slots.
+      if (note[`${key}_fileId`]) await driveTrashFile(note[`${key}_fileId`], accessToken);
+      patch[`${key}_fileId`] = null;
+      patch[`${key}_link`] = "";
+      continue;
+    }
+    uploadedImageSignatures.add(signature);
 
     const blob = dataUrlToBlob(image.dataUrl);
     if (!blob) continue;
@@ -491,11 +518,12 @@ async function driveUploadBlob(blob, mimeType, fileName, folderId, existingFileI
   };
 
   let result = await uploadOnce(existingFileId || null);
-  if (!result.ok && existingFileId && (result.status === 403 || result.status === 404)) {
+  if (!result.ok && existingFileId && result.status === 404) {
     result = await uploadOnce(null);
   }
   if (!result.ok) {
     if (result.status === 401) { clearStoredToken(); throw new Error("AUTH_EXPIRED: " + result.error); }
+    if (result.status === 403) throw new Error("DRIVE_PERMISSION_DENIED: " + result.error);
     throw new Error("Upload failed: " + result.error);
   }
   return result.data;
@@ -523,11 +551,30 @@ function isDuplicateExcelName(name) {
 
 async function driveGetFileMetadata(fileId, accessToken) {
   const resp = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,parents,trashed,modifiedTime`,
+    `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,parents,trashed,modifiedTime,webViewLink,capabilities(canAddChildren,canEdit)`,
     { headers: { Authorization: "Bearer " + accessToken } }
   );
   if (!resp.ok) return null;
   return await resp.json();
+}
+
+async function driveGetWritableToken(folderId) {
+  let token = getStoredToken();
+  if (!token) token = await requestAccessToken();
+
+  let folder = await driveGetFileMetadata(folderId, token.accessToken);
+  if (folder?.capabilities?.canAddChildren === true) return token;
+
+  // A silent OAuth request can reuse the wrong Google account. On a permission
+  // mismatch, clear it and let the user explicitly select the Drive account.
+  clearStoredToken();
+  token = await requestAccessToken(true);
+  folder = await driveGetFileMetadata(folderId, token.accessToken);
+  if (folder?.capabilities?.canAddChildren !== true) {
+    clearStoredToken();
+    throw new Error("DRIVE_PERMISSION_DENIED: บัญชี Google ที่เลือกไม่มีสิทธิ์ Editor ในโฟลเดอร์ Operative note");
+  }
+  return token;
 }
 
 // Search Drive for the canonical Excel file and accidental duplicate names in the target folder.
@@ -589,8 +636,7 @@ async function driveFindExcelFile(folderId, accessToken) {
 // Main function: upsert note row in the shared Excel file on Drive
 async function driveUpsertExcel(note, folderId) {
   await loadXlsx();
-  let token = getStoredToken();
-  if (!token) token = await requestAccessToken();
+  const token = await driveGetWritableToken(folderId);
   const at = token.accessToken;
 
   const noteForExcel = await uploadSpecimenImages(note, folderId, at);
@@ -691,6 +737,8 @@ async function driveUpsertExcel(note, folderId) {
     "patientFolderLink",
     "specimen_image_1_fileId",
     "specimen_image_1_link",
+    "specimen_image_2_fileId",
+    "specimen_image_2_link",
   ].forEach(key => {
     if (noteForExcel[key] !== note[key]) notePatch[key] = noteForExcel[key];
   });
@@ -1024,6 +1072,9 @@ function App() {
       } else if (msg.includes("access_denied") || msg.includes("not completed the Google verification")) {
         setDriveSetup(true);
         toast.push("Access denied — กรุณาเพิ่ม email ของคุณเป็น Test user ใน Google Cloud Console", "err");
+      } else if (msg.includes("DRIVE_PERMISSION_DENIED")) {
+        clearStoredToken();
+        toast.push("ไม่มีสิทธิ์เขียนโฟลเดอร์ Operative note · กรุณาเลือกบัญชีที่เป็น Editor แล้วกด Upload อีกครั้ง", "err");
       } else if (msg.includes("Upload failed")) {
         // Show the raw Drive error so we can debug
         toast.push("Drive error: " + msg.replace("Upload failed: ", "").slice(0, 120), "err");
