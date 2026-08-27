@@ -381,6 +381,47 @@ async function driveCreateFolder(parentFolderId, folderName, accessToken) {
   return await resp.json();
 }
 
+const DRIVE_ARCHIVE_FOLDER_NAME = "Archive";
+
+async function driveEnsureArchiveFolder(rootFolderId, accessToken) {
+  const existing = await driveFindFolderByName(rootFolderId, DRIVE_ARCHIVE_FOLDER_NAME, accessToken);
+  if (existing) return existing;
+  return await driveCreateFolder(rootFolderId, DRIVE_ARCHIVE_FOLDER_NAME, accessToken);
+}
+
+function archivedExcelName(file) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const suffix = String(file?.id || "file").slice(-8);
+  return `Archived_${safeFilePart(file?.name || EXCEL_FILENAME).replace(/\.xlsx$/i, "")}_${stamp}_${suffix}.xlsx`;
+}
+
+async function driveArchiveExcelFiles(files, rootFolderId, accessToken) {
+  if (!files.length) return [];
+  const archiveFolder = await driveEnsureArchiveFolder(rootFolderId, accessToken);
+  return await Promise.all(files.map(async file => {
+    const addParents = encodeURIComponent(archiveFolder.id);
+    const removeParents = encodeURIComponent(rootFolderId);
+    const resp = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${file.id}?addParents=${addParents}&removeParents=${removeParents}&fields=id,name,parents,webViewLink,modifiedTime&supportsAllDrives=true`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: "Bearer " + accessToken,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: archivedExcelName(file) }),
+      }
+    );
+    if (!resp.ok) {
+      const err = await resp.text();
+      if (resp.status === 401) { clearStoredToken(); throw new Error("AUTH_EXPIRED: " + err); }
+      if (resp.status === 403) throw new Error("DRIVE_PERMISSION_DENIED: " + err);
+      throw new Error("Archive duplicate workbook failed: " + err);
+    }
+    return await resp.json();
+  }));
+}
+
 async function driveEnsurePatientFolder(note, rootFolderId, accessToken) {
   if (note.patientFolderId) {
     const existingFolder = await driveGetFileMetadata(note.patientFolderId, accessToken);
@@ -551,7 +592,7 @@ function isDuplicateExcelName(name) {
 
 async function driveGetFileMetadata(fileId, accessToken) {
   const resp = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,parents,trashed,modifiedTime,webViewLink,capabilities(canAddChildren,canEdit)`,
+    `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,parents,trashed,modifiedTime,size,webViewLink,capabilities(canAddChildren,canEdit)`,
     { headers: { Authorization: "Bearer " + accessToken } }
   );
   if (!resp.ok) return null;
@@ -598,30 +639,38 @@ async function driveTrashFile(fileId, accessToken) {
   if (!resp.ok) console.warn("Unable to trash duplicate Drive file:", await resp.text());
 }
 
-async function driveResolveExcelFile(folderId, accessToken) {
-  const storedId = getExcelFileId();
+async function driveResolveExcelFile(folderId, accessToken, { archiveDuplicates = false } = {}) {
   const files = await driveFindExcelFiles(folderId, accessToken);
   const canonical = files.find(f => f.name === EXCEL_FILENAME) || null;
   const duplicates = files.filter(f => isDuplicateExcelName(f.name));
 
   if (canonical) {
     setExcelFileId(canonical.id);
-    await Promise.all(duplicates.filter(f => f.id !== canonical.id).map(f => driveTrashFile(f.id, accessToken)));
-    return canonical.id;
-  }
-
-  if (storedId) {
-    const meta = await driveGetFileMetadata(storedId, accessToken);
-    const inFolder = meta && Array.isArray(meta.parents) && meta.parents.includes(folderId);
-    if (meta && !meta.trashed && meta.mimeType === EXCEL_MIME && inFolder && (meta.name === EXCEL_FILENAME || isDuplicateExcelName(meta.name))) {
-      setExcelFileId(storedId);
-      return storedId;
+    if (archiveDuplicates && duplicates.length) {
+      await driveArchiveExcelFiles(duplicates.filter(f => f.id !== canonical.id), folderId, accessToken);
     }
-    clearExcelFileId();
+    return canonical.id;
   }
 
   const duplicate = duplicates[0] || null;
   if (duplicate) {
+    // A prior upload may have been auto-renamed by Drive. Promote the newest
+    // surviving copy back to the fixed canonical name before writing again.
+    if (archiveDuplicates) {
+      const resp = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${duplicate.id}?fields=id,name,webViewLink,modifiedTime&supportsAllDrives=true`,
+        {
+          method: "PATCH",
+          headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json" },
+          body: JSON.stringify({ name: EXCEL_FILENAME }),
+        }
+      );
+      if (!resp.ok) throw new Error("Promote canonical workbook failed: " + await resp.text());
+      const promoted = await resp.json();
+      setExcelFileId(promoted.id);
+      await driveArchiveExcelFiles(duplicates.filter(f => f.id !== promoted.id), folderId, accessToken);
+      return promoted.id;
+    }
     setExcelFileId(duplicate.id);
     return duplicate.id;
   }
@@ -631,6 +680,23 @@ async function driveResolveExcelFile(folderId, accessToken) {
 
 async function driveFindExcelFile(folderId, accessToken) {
   return await driveResolveExcelFile(folderId, accessToken);
+}
+
+async function driveGetCanonicalExcelStatus(folderId) {
+  let token = getStoredToken();
+  if (!token) token = await requestAccessToken();
+  const fileId = await driveResolveExcelFile(folderId, token.accessToken, { archiveDuplicates: false });
+  if (!fileId) return null;
+  const metadata = await driveGetFileMetadata(fileId, token.accessToken);
+  if (!metadata || metadata.trashed) return null;
+  setExcelFileId(metadata.id);
+  return {
+    id: metadata.id,
+    name: metadata.name || EXCEL_FILENAME,
+    webViewLink: metadata.webViewLink || `https://drive.google.com/file/d/${metadata.id}/view`,
+    modifiedTime: metadata.modifiedTime || null,
+    size: metadata.size || null,
+  };
 }
 
 // Main function: upsert note row in the shared Excel file on Drive
@@ -646,7 +712,7 @@ async function driveUpsertExcel(note, folderId) {
 
   // Step 1: resolve the canonical file on Drive. Never trust a cached ID until
   // Drive confirms it belongs to the intended workbook/folder.
-  let existingFileId = await driveResolveExcelFile(folderId, at);
+  let existingFileId = await driveResolveExcelFile(folderId, at, { archiveDuplicates: true });
 
   // Step 2: try to download existing workbook
   const readWorkbook = (buf) => XLSX.read(new Uint8Array(buf), { type: "array" });
@@ -657,7 +723,7 @@ async function driveUpsertExcel(note, folderId) {
     }
     if (!wb) {
       // File gone or corrupt — search again before giving up
-      existingFileId = await driveFindExcelFile(folderId, at);
+      existingFileId = await driveResolveExcelFile(folderId, at, { archiveDuplicates: true });
       if (existingFileId) {
         setExcelFileId(existingFileId);
         const buf2 = await driveDownloadFile(existingFileId, at);
@@ -871,12 +937,9 @@ async function driveLoadNotes(folderId) {
   if (!token) token = await requestAccessToken();
   const at = token.accessToken;
 
-  // Find file
-  let fileId = getExcelFileId();
-  if (!fileId) {
-    fileId = await driveFindExcelFile(folderId, at);
-    if (fileId) setExcelFileId(fileId);
-  }
+  // Resolve on every sync. A browser can retain a stale ID for a copy that was
+  // downloaded or later archived; only the canonical name in this folder is valid.
+  const fileId = await driveResolveExcelFile(folderId, at, { archiveDuplicates: false });
   if (!fileId) return [];
 
   const buf = await driveDownloadFile(fileId, at);
@@ -892,10 +955,27 @@ async function driveLoadNotes(folderId) {
   return data.slice(1).filter(row => row.some(v => v !== undefined && v !== "")).map(row => rowToNote(row, headers));
 }
 
+function summarizeWorkbookNotes(notes) {
+  const dates = notes.map(note => String(note.date || "")).filter(Boolean);
+  return {
+    rowCount: notes.length,
+    latestDate: dates.length ? dates.sort().at(-1) : null,
+  };
+}
+
+function formatDriveDate(value) {
+  if (!value) return "ยังไม่ตรวจสอบ";
+  const date = new Date(value);
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" })
+    : String(value);
+}
+
 function App() {
   const [authed, setAuthed] = React.useState(isLoggedIn());
   const [notes, setNotes] = React.useState(() => loadAllNotes());
   const [driveNotes, setDriveNotes] = React.useState([]); // notes loaded from Drive Excel
+  const [canonicalExcel, setCanonicalExcel] = React.useState(null);
   const [driveLoading, setDriveLoading] = React.useState(false);
   const [uploadingAll, setUploadingAll] = React.useState(false); // bulk upload progress
   const [uploadingNoteIds, setUploadingNoteIds] = React.useState(() => new Set());
@@ -908,6 +988,17 @@ function App() {
   const toast = useToast();
 
   const refresh = () => setNotes(loadAllNotes());
+
+  const refreshCanonicalExcelStatus = async (metrics = {}) => {
+    const status = await driveGetCanonicalExcelStatus(DRIVE_FOLDER_ID);
+    if (status) setCanonicalExcel({ ...status, ...metrics, checkedAt: new Date().toISOString() });
+    return status;
+  };
+
+  React.useEffect(() => {
+    if (!authed || !getStoredToken()) return;
+    refreshCanonicalExcelStatus().catch(error => console.warn("Canonical workbook status unavailable:", error));
+  }, [authed]);
 
   // Merge local + drive notes, keeping the one with the newer updatedAt timestamp (dedup by HN+date+name)
   const allNotes = React.useMemo(() => {
@@ -962,6 +1053,11 @@ function App() {
     try {
       const loaded = await driveLoadNotes(DRIVE_FOLDER_ID);
       setDriveNotes(loaded);
+      try {
+        await refreshCanonicalExcelStatus(summarizeWorkbookNotes(loaded));
+      } catch (statusError) {
+        console.warn("Canonical workbook status unavailable after sync:", statusError);
+      }
       toast.push(`โหลดจาก Drive สำเร็จ — ${loaded.length} รายการ ☁`, "ok");
     } catch (e) {
       const msg = String(e.message);
@@ -1057,6 +1153,11 @@ function App() {
       const updated = { ...noteForDrive, ...driveFields };
       upsertNote(updated);
       refresh();
+      try {
+        await refreshCanonicalExcelStatus({ latestDate: noteForDrive.date || null });
+      } catch (statusError) {
+        console.warn("Canonical workbook status unavailable after upload:", statusError);
+      }
       // Use functional update to avoid stale closure — always patch editing if same note
       setEditing(prev => prev && prev.id === note.id ? { ...prev, ...updated } : prev);
       toast.push("อัปโหลด Excel สำเร็จ! บันทึกลง OperativeNotes_CMU.xlsx บน Drive แล้ว ☁", "ok");
@@ -1137,6 +1238,14 @@ function App() {
     setUploadingAll(false);
     setUploadAllProgress(null);
 
+    if (success > 0) {
+      try {
+        await refreshCanonicalExcelStatus();
+      } catch (e) {
+        console.warn("Canonical workbook status unavailable after bulk upload:", e);
+      }
+    }
+
     if (fail === 0) {
       toast.push(`อัปโหลดสำเร็จทั้งหมด ${success} รายการ ☁`, "ok");
     } else {
@@ -1182,6 +1291,15 @@ function App() {
           <button onClick={() => { handleSyncDrive(); closeSidebar(); }} disabled={driveLoading}>
             <span className="dot"></span> {driveLoading ? "กำลังโหลด…" : "☁ Sync จาก Drive"}
           </button>
+          <div style={{ margin: "8px 4px 2px", padding: "10px 12px", borderRadius: 7, border: "1px solid var(--line)", background: "var(--rose-bg)", fontSize: 11.5, color: "var(--ink-2)", lineHeight: 1.5 }}>
+            <div style={{ color: "var(--rose-deep)", fontWeight: 600, marginBottom: 3 }}>☁ ไฟล์กลางบน Drive</div>
+            {canonicalExcel ? <>
+              <a href={canonicalExcel.webViewLink} target="_blank" rel="noopener" style={{ display: "block", fontFamily: "var(--font-mono)", fontSize: 10.5, overflowWrap: "anywhere" }}>{canonicalExcel.name}</a>
+              <div>แก้ไข: {formatDriveDate(canonicalExcel.modifiedTime)}</div>
+              {canonicalExcel.rowCount != null && <div>ข้อมูล: {canonicalExcel.rowCount.toLocaleString()} เคส · ล่าสุด {canonicalExcel.latestDate || "—"}</div>}
+              <div title={canonicalExcel.id} style={{ marginTop: 3, color: "var(--ink-3)", fontFamily: "var(--font-mono)", fontSize: 9.5, overflowWrap: "anywhere" }}>ID: {canonicalExcel.id}</div>
+            </> : <div>กด Sync จาก Drive เพื่อยืนยันไฟล์กลางและดูสถานะล่าสุด</div>}
+          </div>
           <button onClick={logout}>
             <span className="dot"></span> Logout
           </button>
