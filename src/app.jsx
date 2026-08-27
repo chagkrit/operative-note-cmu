@@ -304,6 +304,52 @@ function normalizeWorksheetSchema(wb, wsName, desiredName) {
   return nextWs;
 }
 
+// Keep the workbook as a continuous case list.  Long operative narratives may
+// otherwise expand a row until it resembles a blank separator in Drive's
+// preview.  Truly empty rows are removed by shifting their original cells, so
+// values, formulas, hyperlinks and cell formatting on real cases are retained.
+function compactWorksheetRows(ws) {
+  const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
+  const rowMeta = ws["!rows"] || [];
+  const rowHasValue = (rowIndex) => {
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: rowIndex, c })];
+      if (cell && String(cell.v ?? cell.w ?? "").trim() !== "") return true;
+    }
+    return false;
+  };
+
+  let writeRow = range.s.r + 1; // preserve the header row
+  for (let readRow = range.s.r + 1; readRow <= range.e.r; readRow++) {
+    if (!rowHasValue(readRow)) continue;
+    if (writeRow !== readRow) {
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const source = XLSX.utils.encode_cell({ r: readRow, c });
+        const destination = XLSX.utils.encode_cell({ r: writeRow, c });
+        if (ws[source]) ws[destination] = ws[source];
+        else delete ws[destination];
+        delete ws[source];
+      }
+      rowMeta[writeRow] = rowMeta[readRow];
+    }
+    writeRow++;
+  }
+
+  for (let r = writeRow; r <= range.e.r; r++) {
+    for (let c = range.s.c; c <= range.e.c; c++) delete ws[XLSX.utils.encode_cell({ r, c })];
+    delete rowMeta[r];
+  }
+
+  range.e.r = Math.max(range.s.r, writeRow - 1);
+  ws["!ref"] = XLSX.utils.encode_range(range);
+  rowMeta.length = writeRow;
+  for (let r = range.s.r; r < writeRow; r++) {
+    rowMeta[r] = { ...(rowMeta[r] || {}), hpt: r === range.s.r ? 20 : 18 };
+  }
+  ws["!rows"] = rowMeta;
+  return ws;
+}
+
 function dataUrlToBlob(dataUrl) {
   const [meta, data] = String(dataUrl || "").split(",");
   if (!meta || !data) return null;
@@ -747,7 +793,8 @@ async function driveUpsertExcel(note, folderId) {
   }
 
   const wsName = wb.Sheets[SHEET_NAME] ? SHEET_NAME : wb.SheetNames[0];
-  const ws = normalizeWorksheetSchema(wb, wsName, SHEET_NAME);
+  let ws = normalizeWorksheetSchema(wb, wsName, SHEET_NAME);
+  ws = compactWorksheetRows(ws);
 
   // Check if this note's row already exists (match by HN + date + name)
   const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
@@ -781,6 +828,10 @@ async function driveUpsertExcel(note, folderId) {
     // Append new row
     XLSX.utils.sheet_add_aoa(ws, [newRow], { origin: -1 });
   }
+
+  // Apply the same compact layout to records just updated or appended.  This
+  // makes the next upload start immediately after the final populated row.
+  ws = compactWorksheetRows(ws);
 
   // Set column widths
   ws["!cols"] = EXCEL_COLUMNS.map((c, i) => {
