@@ -85,26 +85,14 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
   return (
     <>
       {/* Step progress bar */}
-      <div style={{ display: "flex", gap: 0, marginBottom: 16, background: "#fff", border: "1px solid var(--line)", borderRadius: "var(--radius)", overflow: "hidden" }}>
+      <div className="form-progress glass-toolbar" aria-label={`ขั้นตอนที่ ${step} จาก 3`}>
         {stepLabels.map((label, i) => {
           const stepNum = i + 1;
           const done = step > stepNum;
           const active = step === stepNum;
           return (
-            <div key={i} style={{
-              flex: 1, padding: "10px 14px", display: "flex", alignItems: "center", gap: 8,
-              background: done ? "var(--ok)" : active ? "var(--rose)" : "#fdfafa",
-              color: (done || active) ? "#fff" : "var(--ink-3)",
-              borderRight: i < 2 ? "1px solid var(--line)" : "none",
-              transition: "all 0.2s",
-              fontSize: 12.5, fontWeight: active ? 600 : 400,
-            }}>
-              <span style={{
-                width: 20, height: 20, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center",
-                background: (done || active) ? "rgba(255,255,255,0.25)" : "var(--line)",
-                color: (done || active) ? "#fff" : "var(--ink-3)",
-                fontSize: 11, fontWeight: 600, flexShrink: 0,
-              }}>{done ? "✓" : stepNum}</span>
+            <div key={i} className={"form-step" + (done ? " is-done" : "") + (active ? " is-active" : "")}>
+              <span className="form-step-number">{done ? "✓" : stepNum}</span>
               <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label.slice(2)}</span>
             </div>
           );
@@ -120,7 +108,7 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
             {n.date ? ` · ${n.date}` : ""}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8, position: "relative", zIndex: 1, flexWrap: "wrap" }}>
+        <div className="form-action-rail glass-toolbar glass-toolbar--rose">
           <button className="btn" onClick={onCancel}>← กลับ</button>
 
           {/* Step 1: บันทึก */}
@@ -135,7 +123,6 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
           {/* Step 2: Upload to Drive */}
           <button
             className={"btn" + (canUpload ? " btn-primary" : " btn-locked")}
-            style={canUpload ? { background: "var(--rose)", color: "#fff", borderColor: "var(--rose)" } : {}}
             title={!isSaved ? "กรุณา บันทึก ก่อน" : hasUnsaved ? "มีการแก้ไข กรุณา บันทึก ก่อน" : "Upload to Drive"}
             disabled={!!uploadingDrive}
             onClick={() => { if (canUpload) onUploadDrive(n); }}
@@ -367,7 +354,7 @@ function OperativeForm({ note, onChange, onSave, onCancel, onExportPdf, onUpload
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", paddingBottom: 60 }}>
+      <div className="form-action-rail form-action-rail--footer glass-toolbar">
         <button className="btn" onClick={onCancel}>ยกเลิก</button>
         <button className={"btn" + (canExport ? "" : " btn-locked")} title={isLocked ? "ครบ 12h แล้ว — ไม่สามารถ Export PDF ได้" : (!n.driveUploadedAt ? "กรุณา Upload to Drive ก่อน" : "Export PDF")} onClick={() => { if (canExport) onExportPdf(n); }}>Export PDF</button>
         <button

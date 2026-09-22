@@ -1361,8 +1361,8 @@ function App() {
       </aside>
 
       <main className="main">
-        <header className="topbar">
-          <button className="hamburger" onClick={() => setSidebarOpen(v => !v)} aria-label="เปิดเมนู">
+        <header className="topbar glass-toolbar" aria-label="แถบควบคุมหลัก">
+          <button className="hamburger glass-icon-button" onClick={() => setSidebarOpen(v => !v)} aria-label="เปิดเมนู">
             <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
               <line x1="2" y1="4.5" x2="16" y2="4.5"/>
               <line x1="2" y1="9" x2="16" y2="9"/>

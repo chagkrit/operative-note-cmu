@@ -97,7 +97,7 @@ function Dashboard({ notes, localNotes, onNew, onOpen, onDuplicate, onExportPdf,
           <h2>Dashboard</h2>
           <p>Breast & Endocrine Surgery CMU · บันทึกการผ่าตัดทั้งหมด</p>
         </div>
-        <div className="sec-head-right" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <div className="sec-head-right control-cluster">
           <button className="btn btn-ghost" onClick={onSyncDrive} disabled={driveLoading || uploadingAll} title="โหลดรายการทั้งหมดจาก Google Drive">
             {driveLoading ? "กำลังโหลด…" : (hasDriveNotes ? "☁ Synced" : "☁ Sync จาก Drive")}
           </button>
@@ -105,8 +105,8 @@ function Dashboard({ notes, localNotes, onNew, onOpen, onDuplicate, onExportPdf,
             const pendingCount = (localNotes || []).filter(n => !n.driveUploadedAt).length;
             if (uploadingAll && uploadAllProgress) {
               return (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#fdfafa", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 12px", fontSize: 12.5 }}>
-                  <div style={{ width: 80, background: "#f3ecee", borderRadius: 3, height: 6, overflow: "hidden" }}>
+                <div className="upload-progress glass-toolbar" aria-live="polite">
+                  <div className="upload-progress-track">
                     <div style={{ background: "var(--rose)", height: "100%", width: `${(uploadAllProgress.done / uploadAllProgress.total) * 100}%`, transition: "width 0.2s" }} />
                   </div>
                   <span style={{ fontFamily: "var(--font-mono)", color: "var(--ink-2)" }}>{uploadAllProgress.done}/{uploadAllProgress.total}</span>
